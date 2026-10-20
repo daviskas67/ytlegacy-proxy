@@ -1,0 +1,8 @@
+*.bak*
+*.class
+build/
+.gradle/
+local.properties
+*.apk
+yt_patch_work/
+youtube_java/
