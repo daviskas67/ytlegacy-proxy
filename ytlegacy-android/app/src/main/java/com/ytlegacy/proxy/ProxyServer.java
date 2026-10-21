@@ -29,6 +29,12 @@ public class ProxyServer extends NanoHTTPD {
 
     public ProxyServer() throws IOException {
         super("0.0.0.0", 8080);
+        // Загружаем список инстансов в фоне, чтобы не блокировать запуск
+        new Thread(new Runnable() {
+            public void run() {
+                yt2009.updateInstances();
+            }
+        }).start();
     }
 
     @Override

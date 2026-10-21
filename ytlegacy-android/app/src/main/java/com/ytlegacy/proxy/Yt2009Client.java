@@ -7,6 +7,15 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLDecoder;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.List;
+import com.google.gson.reflect.TypeToken;
 import java.util.HashMap;
 import java.util.Map;
 import fi.iki.elonen.NanoHTTPD;
@@ -20,6 +29,13 @@ public class Yt2009Client {
     private static final int HIT_LIMIT = 5;  // после 5 запросов — throttle
     private final java.util.Map<String, Long> failedVideos = new java.util.concurrent.ConcurrentHashMap<String, Long>();
     private static final long NEG_CACHE_TTL = 600000L;  // 60 сек
+
+    private List<String> availableInstances = new ArrayList<String>();
+    private int currentInstanceIndex = 0;
+    private Map<String, Long> deadInstances = new HashMap<String, Long>();
+    private static final long DEAD_TTL = 300000L;
+    private static final String FALLBACK_INSTANCE = "http://femboy.email:730";
+    private static final String INSTANCES_JSON_URL = "http://144.31.189.129/notPipe.json";
     private static final String BROWSER_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -54,7 +70,7 @@ public class Yt2009Client {
         // retry 2 раза — yt2009 иногда рвёт соединение под нагрузкой
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
-                HttpURLConnection c = open(path, null);
+                HttpURLConnection c = openWithFailover(path, null);
                 int code = c.getResponseCode();
                 if (code != 200) {
                     Log.w(TAG, "fetch " + path + " -> HTTP " + code + " (attempt " + attempt + ")");
@@ -269,7 +285,7 @@ public class Yt2009Client {
         };
         for (String p : paths) {
             try {
-                HttpURLConnection c = open(p, session);
+                HttpURLConnection c = openWithFailover(p, session);
                 c.setConnectTimeout(3000);
                 c.setReadTimeout(60000);
                 int code = c.getResponseCode();
@@ -321,5 +337,145 @@ public class Yt2009Client {
         int count = 0, i = 0;
         while ((i = haystack.indexOf(needle, i)) != -1) { count++; i += needle.length(); }
         return count;
+    }
+
+    public void updateInstances() {
+        try {
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) new java.net.URL(INSTANCES_JSON_URL).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            conn.setUseCaches(false);
+
+            if (conn.getResponseCode() != 200) return;
+
+            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
+            StringBuilder response = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) response.append(line);
+            reader.close();
+
+            List<String> parsed = new com.google.gson.Gson().fromJson(response.toString(), new com.google.gson.reflect.TypeToken<List<String>>() {}.getType());
+            if (parsed == null) return;
+
+            List<String> updated = new ArrayList<String>();
+            for (String value : parsed) {
+                if (value == null) continue;
+                String instance = value.trim();
+                if (instance.length() == 0) continue;
+                try {
+                    java.net.URL url = new java.net.URL(instance);
+                    String protocol = url.getProtocol();
+                    if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) continue;
+                    while (instance.endsWith("/")) instance = instance.substring(0, instance.length() - 1);
+                    if (!updated.contains(instance)) updated.add(instance);
+                } catch (Exception ignored) {}
+            }
+
+            synchronized (this) {
+                availableInstances = updated;
+                deadInstances.clear();
+                currentInstanceIndex = 0;
+            }
+            Log.i(TAG, "Updated proxy instances: " + updated.size());
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to update instances: " + e.getMessage());
+        }
+    }
+
+    private synchronized String getActiveInstance() {
+        if (availableInstances == null || availableInstances.isEmpty()) return FALLBACK_INSTANCE;
+        long now = System.currentTimeMillis();
+        int size = availableInstances.size();
+        for (int i = 0; i < size; i++) {
+            if (currentInstanceIndex >= size) currentInstanceIndex = 0;
+            String instance = availableInstances.get(currentInstanceIndex);
+            Long deadAt = deadInstances.get(instance);
+            if (deadAt == null) return instance;
+            if (now - deadAt.longValue() >= DEAD_TTL) {
+                deadInstances.remove(instance);
+                return instance;
+            }
+            currentInstanceIndex = (currentInstanceIndex + 1) % size;
+        }
+        return FALLBACK_INSTANCE;
+    }
+
+    public HttpURLConnection openWithFailover(String path, NanoHTTPD.IHTTPSession session) {
+        Set<String> attempted = new HashSet<String>();
+        for (int attempt = 0; attempt < 3; attempt++) {
+            String instance = getActiveInstance();
+            synchronized (this) {
+                int scanned = 0;
+                while (attempted.contains(instance) && availableInstances != null && !availableInstances.isEmpty() && scanned < availableInstances.size()) {
+                    currentInstanceIndex = (currentInstanceIndex + 1) % availableInstances.size();
+                    instance = getActiveInstance();
+                    scanned++;
+                }
+            }
+            if (instance == null || attempted.contains(instance)) break;
+            attempted.add(instance);
+
+            HttpURLConnection connection = null;
+            try {
+                String suffix = path == null ? "" : path;
+                if (!suffix.startsWith("/")) suffix = "/" + suffix;
+                String base = instance;
+                while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+                
+                java.net.URL target = new java.net.URL(base + suffix);
+                connection = (HttpURLConnection) target.openConnection();
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(60000);
+                connection.setInstanceFollowRedirects(true);
+
+                if (session != null) {
+                    connection.setRequestMethod(session.getMethod().name());
+                    Map<String, String> headers = session.getHeaders();
+                    if (headers != null) {
+                        for (Map.Entry<String, String> entry : headers.entrySet()) {
+                            String key = entry.getKey();
+                            String value = entry.getValue();
+                            if (key == null || value == null) continue;
+                            String lower = key.toLowerCase(Locale.US);
+                            if ("host".equals(lower) || "connection".equals(lower) || "proxy-connection".equals(lower) || "keep-alive".equals(lower) || "transfer-encoding".equals(lower) || "content-length".equals(lower) || "upgrade".equals(lower)) continue;
+                            if ("user-agent".equals(lower) || "accept".equals(lower) || "accept-language".equals(lower) || "range".equals(lower) || "referer".equals(lower) || "origin".equals(lower) || "cookie".equals(lower) || "authorization".equals(lower) || "if-none-match".equals(lower) || "if-modified-since".equals(lower) || "content-type".equals(lower) || lower.startsWith("x-gdata-") || lower.startsWith("x-youtube-")) {
+                                connection.setRequestProperty(key, value);
+                            }
+                        }
+                    }
+                }
+
+                int responseCode = connection.getResponseCode();
+                if (responseCode == 200 || responseCode == 206) return connection;
+
+                if (responseCode == 404 || responseCode == 429) {
+                    synchronized (this) {
+                        deadInstances.put(instance, System.currentTimeMillis());
+                        if (availableInstances != null && !availableInstances.isEmpty()) {
+                            currentInstanceIndex = (currentInstanceIndex + 1) % availableInstances.size();
+                        }
+                    }
+                    Log.w(TAG, "Instance temporarily disabled: " + instance + " (HTTP " + responseCode + ")");
+                } else {
+                    synchronized (this) {
+                        if (availableInstances != null && !availableInstances.isEmpty()) {
+                            currentInstanceIndex = (currentInstanceIndex + 1) % availableInstances.size();
+                        }
+                    }
+                }
+                connection.disconnect();
+            } catch (Exception e) {
+                if (connection != null) connection.disconnect();
+                synchronized (this) {
+                    deadInstances.put(instance, System.currentTimeMillis());
+                    if (availableInstances != null && !availableInstances.isEmpty()) {
+                        currentInstanceIndex = (currentInstanceIndex + 1) % availableInstances.size();
+                    }
+                }
+                Log.w(TAG, "Instance connection failed: " + instance + " -> " + e.getMessage());
+            }
+        }
+        return null;
     }
 }
