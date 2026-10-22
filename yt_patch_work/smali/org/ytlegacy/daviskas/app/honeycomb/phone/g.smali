@@ -667,6 +667,8 @@
 .method private p()V
     .locals 5
 
+    .prologue
+    .line 292
     iget-object v0, p0, Lorg/ytlegacy/daviskas/app/honeycomb/phone/g;->z:Lorg/ytlegacy/daviskas/app/ui/fg;
 
     const/4 v1, 0x1
@@ -677,7 +679,8 @@
 
     iget-object v3, p0, Lorg/ytlegacy/daviskas/app/honeycomb/phone/g;->i:Lorg/ytlegacy/daviskas/core/client/bb;
 
-    invoke-virtual {v3}, Lorg/ytlegacy/daviskas/core/client/bb;->a()Lorg/ytlegacy/daviskas/core/async/GDataRequestFactory;
+    # PATCH: invoke-interface (bb - это интерфейс!)
+    invoke-interface {v3}, Lorg/ytlegacy/daviskas/core/client/bb;->a()Lorg/ytlegacy/daviskas/core/async/GDataRequestFactory;
 
     move-result-object v3
 
@@ -685,8 +688,8 @@
 
     iget-object v4, v4, Lorg/ytlegacy/daviskas/core/model/UserProfile;->uploadsUri:Landroid/net/Uri;
 
-    # PATCH: если uploadsUri отсутствует, мы полностью пропускаем инициализацию адаптера
-    if-eqz v4, :cond_no_upload_uri
+    # PATCH: Проверка на null
+    if-eqz v4, :cond_no_upload
 
     invoke-virtual {v3, v4}, Lorg/ytlegacy/daviskas/core/async/GDataRequestFactory;->b(Landroid/net/Uri;)Lorg/ytlegacy/daviskas/core/async/GDataRequest;
 
@@ -696,13 +699,16 @@
 
     invoke-virtual {v0, v1}, Lorg/ytlegacy/daviskas/app/ui/fg;->a([Lorg/ytlegacy/daviskas/core/async/GDataRequest;)V
 
+    .line 294
+    iget-object v0, p0, Lorg/ytlegacy/daviskas/app/honeycomb/phone/g;->z:Lorg/ytlegacy/daviskas/app/ui/fg;
+
     new-instance v1, Lorg/ytlegacy/daviskas/app/honeycomb/phone/i;
 
     invoke-direct {v1, p0}, Lorg/ytlegacy/daviskas/app/honeycomb/phone/i;-><init>(Lorg/ytlegacy/daviskas/app/honeycomb/phone/g;)V
 
     invoke-virtual {v0, v1}, Lorg/ytlegacy/daviskas/app/ui/fg;->a(Lorg/ytlegacy/daviskas/core/ui/g;)V
 
-    :cond_no_upload_uri
+    :cond_no_upload
     return-void
 .end method
 
