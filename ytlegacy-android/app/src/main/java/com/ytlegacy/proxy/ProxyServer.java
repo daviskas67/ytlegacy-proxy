@@ -855,7 +855,7 @@ public class ProxyServer extends NanoHTTPD {
                 String feed = yt2009.fetchText("/feeds/api/users/" + cid);
                 if (feed != null) {
                     java.util.regex.Matcher m = java.util.regex.Pattern
-                        .compile("<" + tagName.replace(":", "\\:") + "[^>]*url=['\\"]([^'\\"]+)['\\"]")
+                        .compile("<" + tagName.replace(":", "\\:") + "[^>]*url=['\"]([^'\"]+)['\"]")
                         .matcher(feed);
                     if (m.find()) {
                         String url = m.group(1);
