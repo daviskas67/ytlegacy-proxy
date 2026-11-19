@@ -32,7 +32,7 @@ cd ytlegacy-android
 gradle --no-daemon :app:assembleDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions also uploads it as the `ytlegacy-proxy-v1.6-debug` artifact for 14 days.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions also uploads it as the `ytlegacy-proxy-v1.6-debug` artifact for 14 days. The v1.6 release asset is published after the `release v1.6` commit builds successfully.
 
 The optional `build-manual.sh` path is for environments that already provide the Android SDK tools, D8, Gson 2.2.4, and NanoHTTPD 2.3.1 jars.
 
