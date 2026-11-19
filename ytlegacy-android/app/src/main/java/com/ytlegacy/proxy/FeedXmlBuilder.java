@@ -177,7 +177,7 @@ public class FeedXmlBuilder {
             "  <author><name>" + t + "</name></author>\n" +
             "  <yt:username>" + t + "</yt:username>\n" +
             "  <yt:channelId>" + t + "</yt:channelId>\n" +
-            "  <media:thumbnail url=\"" + BASE + "/vi/dQw4w9WgXcQ/0.jpg\" height=\"90\" width=\"90\"/>\n" +
+            "  <media:thumbnail url=\"" + BASE + "/channel_avatar/" + t + "\" height=\"90\" width=\"90\"/>\n" +
             "  <yt:statistics subscriberCount=\"0\" videoWatchCount=\"0\"/>\n" +
             "</entry>";
     }
