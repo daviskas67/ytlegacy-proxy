@@ -23,7 +23,9 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
 
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-30" "build-tools;29.0.3"
@@ -36,3 +38,11 @@ jobs:
       - name: Assemble debug APK
         working-directory: ytlegacy-android
         run: gradle --no-daemon :app:assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ytlegacy-proxy-v1.6-debug
+          path: ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
