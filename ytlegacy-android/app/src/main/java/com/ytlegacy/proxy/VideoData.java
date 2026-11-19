@@ -27,6 +27,87 @@ public class VideoData {
     public List<String> tags = new ArrayList<>();
     public long likeCount = 0;
 
+    /** Converts a public Invidious API video object into the legacy feed/player model. */
+    public static VideoData fromInvidious(JsonObject data) {
+        if (data == null) return null;
+        VideoData v = new VideoData();
+        v.id = getStr(data, "videoId", "");
+        if (v.id.length() == 0) return null;
+
+        v.title = getStr(data, "title", v.id);
+        v.author = getStr(data, "author", "YouTube");
+        v.channelId = getStr(data, "authorId", "");
+        v.description = getStr(data, "description", "");
+        v.lengthSeconds = getInt(data, "lengthSeconds", 0);
+        v.viewCount = getLong(data, "viewCount", 0);
+        v.likeCount = getLong(data, "likeCount", 0);
+        v.isLive = getBool(data, "liveNow");
+        v.category = getStr(data, "genre", "Entertainment");
+
+        if (data.has("keywords") && data.get("keywords").isJsonArray()) {
+            JsonArray words = data.getAsJsonArray("keywords");
+            for (int i = 0; i < words.size() && i < 15; i++) {
+                try { v.tags.add(words.get(i).getAsString()); } catch (Exception ignored) {}
+            }
+        }
+
+        try {
+            if (data.has("published") && data.get("published").isJsonPrimitive()) {
+                long publishedAt = data.get("published").getAsLong();
+                if (publishedAt > 0L) {
+                    java.text.SimpleDateFormat iso = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+                    iso.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                    v.published = iso.format(new java.util.Date(publishedAt * 1000L));
+                    java.text.SimpleDateFormat day = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US);
+                    day.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                    v.uploadDate = day.format(new java.util.Date(publishedAt * 1000L));
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // Prefer a progressive MP4 format compatible with the 2013 client.
+        JsonObject selected = null;
+        JsonArray formats = data.has("formatStreams") && data.get("formatStreams").isJsonArray()
+            ? data.getAsJsonArray("formatStreams") : null;
+        if (formats != null) {
+            JsonObject firstMp4 = null;
+            for (int i = 0; i < formats.size(); i++) {
+                try {
+                    JsonObject f = formats.get(i).getAsJsonObject();
+                    String url = getStr(f, "url", "");
+                    String type = getStr(f, "type", "");
+                    int itag = getInt(f, "itag", -1);
+                    if (url.length() == 0 || !type.toLowerCase(java.util.Locale.US).startsWith("video/mp4")) continue;
+                    if (itag == 18) { selected = f; break; }
+                    if (firstMp4 == null) firstMp4 = f;
+                } catch (Exception ignored) {}
+            }
+            if (selected == null) selected = firstMp4;
+        }
+        if (selected != null) {
+            v.streamUrl = getStr(selected, "url", "");
+            v.itag = getInt(selected, "itag", 18);
+            v.mimeType = getStr(selected, "type", "video/mp4");
+            String resolution = getStr(selected, "resolution", "");
+            String quality = getStr(selected, "qualityLabel", "");
+            int height = parseResolutionHeight(resolution);
+            if (height <= 0) height = parseResolutionHeight(quality);
+            if (height > 0) v.height = height;
+            if (v.height >= 720) v.isHd = true;
+        }
+        return v;
+    }
+
+    private static int parseResolutionHeight(String value) {
+        if (value == null) return 0;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{3,4})p").matcher(value);
+        return m.find() ? safeParseInt(m.group(1), 0) : 0;
+    }
+
+    private static int safeParseInt(String value, int fallback) {
+        try { return Integer.parseInt(value); } catch (Exception ignored) { return fallback; }
+    }
+
     public static VideoData fromInnerTube(JsonObject resp) {
         VideoData v = new VideoData();
         if (resp == null) return v;

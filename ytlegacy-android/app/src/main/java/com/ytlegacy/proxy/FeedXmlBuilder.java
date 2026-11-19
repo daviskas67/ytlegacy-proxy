@@ -42,6 +42,93 @@ public class FeedXmlBuilder {
         return buildVideoFeed(resp, "standard:" + feedName, title);
     }
 
+    /** Converts Invidious API video arrays into the Atom/GData format expected by YouTube 5.x. */
+    public static String buildInvidiousFeed(JsonArray videos, String feedId, String feedTitle) {
+        StringBuilder entries = new StringBuilder();
+        java.util.HashSet<String> seen = new java.util.HashSet<String>();
+        int count = 0;
+        if (videos != null) {
+            for (int i = 0; i < videos.size() && count < 25; i++) {
+                try {
+                    if (!videos.get(i).isJsonObject()) continue;
+                    VideoData v = VideoData.fromInvidious(videos.get(i).getAsJsonObject());
+                    if (v == null || v.id.length() == 0 || !seen.add(v.id)) continue;
+                    String entry = GDataXmlBuilder.buildVideoEntryXml(v);
+                    if (entry != null) { entries.append(entry); count++; }
+                } catch (Exception e) {
+                    Log.w(TAG, "Invidious item skipped: " + e.getMessage());
+                }
+            }
+        }
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+            "<feed xmlns=\"http://www.w3.org/2005/Atom\" " +
+            "xmlns:media=\"http://search.yahoo.com/mrss/\" " +
+            "xmlns:yt=\"http://gdata.youtube.com/schemas/2007\" " +
+            "xmlns:openSearch=\"http://a9.com/-/spec/opensearch/1.1/\" " +
+            "xmlns:gd=\"http://schemas.google.com/g/2005\">\n" +
+            "<id>tag:youtube.com,2008:feed:" + esc(feedId) + "</id>\n" +
+            "<title>" + esc(feedTitle) + "</title>\n" +
+            "<openSearch:totalResults>" + count + "</openSearch:totalResults>\n" +
+            "<openSearch:startIndex>1</openSearch:startIndex>\n" +
+            "<openSearch:itemsPerPage>" + count + "</openSearch:itemsPerPage>\n" +
+            entries.toString() + "</feed>";
+    }
+
+    /** Converts the public Invidious comments response into a compact legacy Atom feed. */
+    public static String buildInvidiousComments(JsonObject response, String videoId) {
+        JsonArray comments = response != null && response.has("comments")
+                && response.get("comments").isJsonArray()
+            ? response.getAsJsonArray("comments") : new JsonArray();
+        StringBuilder entries = new StringBuilder();
+        int count = 0;
+        for (int i = 0; i < comments.size() && count < 40; i++) {
+            try {
+                JsonObject item = comments.get(i).getAsJsonObject();
+                String id = getStr(item, "commentId");
+                if (id.length() == 0) id = videoId + "-" + i;
+                String author = getStr(item, "author");
+                String authorId = getStr(item, "authorId");
+                String content = getStr(item, "content");
+                long published = 0L;
+                try { published = item.has("published") ? item.get("published").getAsLong() : 0L; }
+                catch (Exception ignored) {}
+                String date = "2013-01-01T00:00:00.000Z";
+                if (published > 0L) {
+                    SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+                    iso.setTimeZone(TimeZone.getTimeZone("UTC"));
+                    date = iso.format(new Date(published * 1000L));
+                }
+                long likes = 0L;
+                try { likes = item.has("likeCount") ? item.get("likeCount").getAsLong() : 0L; }
+                catch (Exception ignored) {}
+                entries.append("  <entry><id>tag:youtube.com,2008:comment:")
+                    .append(esc(id)).append("</id><published>").append(date)
+                    .append("</published><updated>").append(date)
+                    .append("</updated><author><name>").append(esc(author))
+                    .append("</name><uri>").append(BASE).append("/feeds/api/users/")
+                    .append(esc(authorId)).append("</uri></author><content type=\"text\">")
+                    .append(esc(content)).append("</content><yt:videoid>")
+                    .append(esc(videoId)).append("</yt:videoid><yt:commentId>")
+                    .append(esc(id)).append("</yt:commentId><yt:rating numLikes=\"")
+                    .append(likes).append("\"/></entry>\n");
+                count++;
+            } catch (Exception e) {
+                Log.w(TAG, "Comment parse error: " + e.getMessage());
+            }
+        }
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+            "<feed xmlns=\"http://www.w3.org/2005/Atom\" " +
+            "xmlns:yt=\"http://gdata.youtube.com/schemas/2007\" " +
+            "xmlns:gd=\"http://schemas.google.com/g/2005\" " +
+            "xmlns:openSearch=\"http://a9.com/-/spec/opensearch/1.1/\">\n" +
+            "<id>tag:youtube.com,2008:comments:" + esc(videoId) + "</id>\n" +
+            "<title>Comments</title>\n" +
+            "<openSearch:totalResults>" + count + "</openSearch:totalResults>\n" +
+            "<openSearch:startIndex>1</openSearch:startIndex>\n" +
+            "<openSearch:itemsPerPage>" + count + "</openSearch:itemsPerPage>\n" +
+            entries.toString() + "</feed>";
+    }
+
     private static String buildVideoFeed(JsonObject resp, String feedId, String feedTitle) {
         StringBuilder entries = new StringBuilder();
         int count = 0;

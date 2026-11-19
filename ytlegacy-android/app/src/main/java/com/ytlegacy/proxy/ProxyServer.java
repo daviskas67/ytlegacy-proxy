@@ -1,6 +1,7 @@
 package com.ytlegacy.proxy;
 
 import android.util.Log;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import fi.iki.elonen.NanoHTTPD;
 
@@ -19,7 +20,8 @@ public class ProxyServer extends NanoHTTPD {
     private static final String DEVICE_KEY = "XqWdDlb37csu+WU5qX2zR3y3gamS4ITVnK+r0looTM0=";
     private static final String LOCAL_BASE = "http://127.0.0.1:8080";
 
-    private static final String VERSION = "1.6";
+    private static final String VERSION = "1.7";
+    private final InvidiousClient invidious = new InvidiousClient();
     private final Yt2009Client yt2009 = new Yt2009Client();
     private final InnerTubeClient innerTube = new InnerTubeClient();
     private final AtomicLong requestCount = new AtomicLong();
@@ -42,7 +44,8 @@ public class ProxyServer extends NanoHTTPD {
             public void run() {
                 yt2009.updateInstances();
             }
-        }).start();
+        }, "yt2009-instance-loader").start();
+        invidious.refreshInBackground();
     }
 
     @Override
@@ -53,6 +56,7 @@ public class ProxyServer extends NanoHTTPD {
         try {
             // === служебные ===
             if ("/health".equals(uri) || "/api/status".equals(uri)) return healthResponse();
+            if ("/api/invidious".equals(uri)) return json(invidious.getStatus().toString());
             if ("/api/cache".equals(uri)) return cacheResponse();
             if ("/api/cache/clear".equals(uri)) {
                 if (!"POST".equalsIgnoreCase(session.getMethod().name()))
@@ -144,8 +148,20 @@ public class ProxyServer extends NanoHTTPD {
                     uri.indexOf("/related")));
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "RELATED: " + vid);
-                String body = yt2009.fetchText(appendQuery("/feeds/api/videos/" + vid + "/related", session.getParms()));
-                if (body != null && body.contains("<entry") && body.length() >= 200) return xml(body);
+
+                String body = null;
+                JsonObject invVideo = invidious.video(vid);
+                if (invVideo != null && invVideo.has("recommendedVideos")
+                        && invVideo.get("recommendedVideos").isJsonArray()) {
+                    String feed = FeedXmlBuilder.buildInvidiousFeed(
+                        invVideo.getAsJsonArray("recommendedVideos"), "related:" + vid, "Related videos");
+                    if (feed.contains("<entry")) return xml(feed);
+                }
+                if (invidious.getHealthyCount() == 0) {
+                    body = yt2009.fetchText(appendQuery(
+                        "/feeds/api/videos/" + vid + "/related", session.getParms()));
+                    if (body != null && body.contains("<entry") && body.length() >= 200) return xml(body);
+                }
                 try {
                     JsonObject next = innerTube.next(vid);
                     String modernFeed = FeedXmlBuilder.buildRelatedFeed(next, vid);
@@ -153,8 +169,10 @@ public class ProxyServer extends NanoHTTPD {
                 } catch (Exception e) {
                     Log.w(TAG, "InnerTube related fallback failed: " + e.getMessage());
                 }
-                String pop = yt2009.fetchText("/feeds/api/standardfeeds/most_popular");
-                if (pop != null && pop.contains("<entry")) return xml(pop);
+                if (invidious.getHealthyCount() == 0) {
+                    String pop = yt2009.fetchText("/feeds/api/standardfeeds/most_popular");
+                    if (pop != null && pop.contains("<entry")) return xml(pop);
+                }
                 return xml(body != null ? body : emptyFeed("related"));
             }
 
@@ -164,8 +182,13 @@ public class ProxyServer extends NanoHTTPD {
                     uri.indexOf("/comments")));
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "COMMENTS: " + vid);
-                String body = yt2009.fetchText(appendQuery("/feeds/api/videos/" + vid + "/comments", session.getParms()));
-                if (body != null) return xml(body);
+                JsonObject invComments = invidious.comments(vid);
+                if (invComments != null) return xml(FeedXmlBuilder.buildInvidiousComments(invComments, vid));
+                if (invidious.getHealthyCount() == 0) {
+                    String body = yt2009.fetchText(appendQuery(
+                        "/feeds/api/videos/" + vid + "/comments", session.getParms()));
+                    if (body != null) return xml(body);
+                }
                 return xml(emptyFeed("comments"));
             }
 
@@ -184,24 +207,33 @@ public class ProxyServer extends NanoHTTPD {
                 return xml(GDataXmlBuilder.buildPlayerEntry(getVideoData(vid)));
             }
 
-            // === /feeds/api/videos?q= — поиск ===
+            // === /feeds/api/videos?q= — Invidious first, yt2009 only if pool is down ===
             if (uri.startsWith("/feeds/api/videos") && !uri.contains("/videos/")) {
                 String query = session.getParms().get("q");
                 if (query == null) query = "";
                 Log.i(TAG, "SEARCH: " + query);
-                String body = yt2009.fetchText(appendQuery("/feeds/api/videos", session.getParms()));
-                if (body != null && body.contains("<entry")) return xml(body);
-                try {
-                    JsonObject modern = innerTube.search(query);
-                    String modernFeed = FeedXmlBuilder.buildSearchFeed(modern, query);
-                    if (modernFeed.contains("<entry")) return xml(modernFeed);
-                } catch (Exception e) {
-                    Log.w(TAG, "InnerTube search fallback failed: " + e.getMessage());
+                JsonArray videos = invidious.search(query);
+                if (videos != null) {
+                    String feed = FeedXmlBuilder.buildInvidiousFeed(
+                        videos, "search:" + query, "Search results for " + query);
+                    if (feed.contains("<entry") || invidious.getHealthyCount() > 0) return xml(feed);
                 }
-                return xml(body != null ? body : emptyFeed("search"));
+                if (invidious.getHealthyCount() == 0) {
+                    String body = yt2009.fetchText(appendQuery("/feeds/api/videos", session.getParms()));
+                    if (body != null && body.contains("<entry")) return xml(body);
+                    try {
+                        JsonObject modern = innerTube.search(query);
+                        String modernFeed = FeedXmlBuilder.buildSearchFeed(modern, query);
+                        if (modernFeed.contains("<entry")) return xml(modernFeed);
+                    } catch (Exception e) {
+                        Log.w(TAG, "InnerTube search fallback failed: " + e.getMessage());
+                    }
+                    return xml(body != null ? body : emptyFeed("search"));
+                }
+                return xml(emptyFeed("search"));
             }
 
-            // === /feeds/api/playlists/{id} — legacy playlist feed ===
+            // === /feeds/api/playlists/{id} — Invidious first ===
             if (uri.startsWith("/feeds/api/playlists/")) {
                 String playlistPath = stripQuery(uri.substring("/feeds/api/playlists/".length()));
                 boolean videosPath = playlistPath.endsWith("/videos");
@@ -210,42 +242,59 @@ public class ProxyServer extends NanoHTTPD {
                     playlistPath = playlistPath.substring(0, playlistPath.indexOf('/'));
                 if (!PLAYLIST_ID.matcher(playlistPath).matches())
                     return text(Response.Status.BAD_REQUEST, "Bad playlist id");
-
-                String legacyPath = "/feeds/api/playlists/" + playlistPath
-                    + (videosPath ? "/videos" : "");
-                String body = yt2009.fetchText(appendQuery(legacyPath, session.getParms()));
-                if (body != null && body.contains("<entry")) return xml(body);
-
-                try {
-                    String browseId = playlistPath.startsWith("VL")
-                        ? playlistPath : "VL" + playlistPath;
-                    JsonObject modern = innerTube.browse(browseId);
-                    String modernFeed = FeedXmlBuilder.buildPlaylistFeed(modern, playlistPath);
-                    if (modernFeed.contains("<entry")) return xml(modernFeed);
-                } catch (Exception e) {
-                    Log.w(TAG, "InnerTube playlist fallback failed: " + e.getMessage());
+                JsonObject invPlaylist = invidious.playlist(playlistPath, 1);
+                if (invPlaylist != null && invPlaylist.has("videos")
+                        && invPlaylist.get("videos").isJsonArray()) {
+                    String feed = FeedXmlBuilder.buildInvidiousFeed(
+                        invPlaylist.getAsJsonArray("videos"), "playlist:" + playlistPath,
+                        VideoData.getStr(invPlaylist, "title", "Playlist " + playlistPath));
+                    if (feed.contains("<entry") || invidious.getHealthyCount() > 0) return xml(feed);
                 }
-                return xml(body != null ? body : emptyFeed("playlist"));
-            }
-
-            // === /feeds/api/standardfeeds/* ===
-            if (uri.startsWith("/feeds/api/standardfeeds/")) {
-                Log.i(TAG, "FEED: " + uri);
-                String body = yt2009.fetchText(appendQuery(uri, session.getParms()));
-                if (body != null && body.contains("<entry")) return xml(body);
-
-                String feedName = stripQuery(uri.substring("/feeds/api/standardfeeds/".length()));
-                if ("most_popular".equals(feedName) || "top_rated".equals(feedName)
-                        || "recently_featured".equals(feedName)) {
+                if (invidious.getHealthyCount() == 0) {
+                    String legacyPath = "/feeds/api/playlists/" + playlistPath
+                        + (videosPath ? "/videos" : "");
+                    String body = yt2009.fetchText(appendQuery(legacyPath, session.getParms()));
+                    if (body != null && body.contains("<entry")) return xml(body);
                     try {
-                        JsonObject modern = innerTube.browse("FEtrending");
-                        String modernFeed = FeedXmlBuilder.buildStandardFeed(modern, feedName);
+                        String browseId = playlistPath.startsWith("VL")
+                            ? playlistPath : "VL" + playlistPath;
+                        JsonObject modern = innerTube.browse(browseId);
+                        String modernFeed = FeedXmlBuilder.buildPlaylistFeed(modern, playlistPath);
                         if (modernFeed.contains("<entry")) return xml(modernFeed);
                     } catch (Exception e) {
-                        Log.w(TAG, "InnerTube standard feed fallback failed: " + e.getMessage());
+                        Log.w(TAG, "InnerTube playlist fallback failed: " + e.getMessage());
                     }
+                    return xml(body != null ? body : emptyFeed("playlist"));
                 }
-                return xml(body != null ? body : emptyFeed("feed"));
+                return xml(emptyFeed("playlist"));
+            }
+
+            // === /feeds/api/standardfeeds/* — Invidious trending first ===
+            if (uri.startsWith("/feeds/api/standardfeeds/")) {
+                Log.i(TAG, "FEED: " + uri);
+                String feedName = stripQuery(uri.substring("/feeds/api/standardfeeds/".length()));
+                JsonArray trending = invidious.trending();
+                if (trending != null) {
+                    String feed = FeedXmlBuilder.buildInvidiousFeed(
+                        trending, "standard:" + feedName, "Trending videos");
+                    if (feed.contains("<entry") || invidious.getHealthyCount() > 0) return xml(feed);
+                }
+                if (invidious.getHealthyCount() == 0) {
+                    String body = yt2009.fetchText(appendQuery(uri, session.getParms()));
+                    if (body != null && body.contains("<entry")) return xml(body);
+                    if ("most_popular".equals(feedName) || "top_rated".equals(feedName)
+                            || "recently_featured".equals(feedName)) {
+                        try {
+                            JsonObject modern = innerTube.browse("FEtrending");
+                            String modernFeed = FeedXmlBuilder.buildStandardFeed(modern, feedName);
+                            if (modernFeed.contains("<entry")) return xml(modernFeed);
+                        } catch (Exception e) {
+                            Log.w(TAG, "InnerTube standard feed fallback failed: " + e.getMessage());
+                        }
+                    }
+                    return xml(body != null ? body : emptyFeed("feed"));
+                }
+                return xml(emptyFeed("feed"));
             }
 
             // === /feeds/api/users/default/* ===
@@ -268,60 +317,81 @@ public class ProxyServer extends NanoHTTPD {
                 if (cid.equals("default") || cid.equals("Channel") || cid.equals("channel"))
                     return xml(emptyFeed("default"));
 
-                // если sub начинается с uploads/favorites/etc и cid = имя, резолвим в UC-id
+                // Resolve non-UC channel names via Invidious before considering yt2009.
                 if (!cid.startsWith("UC") && !sub.isEmpty()) {
                     String uc = nameToUc.get(cid);
-                    if (uc == null) {
-                        // тянем /feeds/api/users/{name} - там должен быть UC-id
-                        String prof = yt2009.fetchText("/feeds/api/users/" + cid);
-                        if (prof != null) {
-                            uc = extractUcIdFromProfile(prof);
-                            if (uc != null) {
-                                nameToUc.put(cid, uc);
-                                Log.i(TAG, "Resolved '" + cid + "' -> " + uc + " (from profile)");
+                    if (uc == null && invidious.getHealthyCount() > 0) {
+                        JsonArray matches = invidious.searchChannels(cid);
+                        if (matches != null) {
+                            for (int i = 0; i < matches.size(); i++) {
+                                try {
+                                    String candidate = VideoData.getStr(matches.get(i).getAsJsonObject(), "authorId", "");
+                                    if (candidate.startsWith("UC") && candidate.length() == 24) {
+                                        uc = candidate;
+                                        break;
+                                    }
+                                } catch (Exception ignored) {}
                             }
                         }
                     }
-                    if (uc != null) cid = uc;
+                    if (uc == null && invidious.getHealthyCount() == 0) {
+                        String profile = yt2009.fetchText("/feeds/api/users/" + cid);
+                        if (profile != null) uc = extractUcIdFromProfile(profile);
+                    }
+                    if (uc != null) {
+                        nameToUc.put(cid, uc);
+                        cid = uc;
+                    }
                 }
 
-                // сначала пробуем как есть
+                boolean uploadsRequest = sub.startsWith("uploads");
+                if (uploadsRequest && cid.startsWith("UC") && cid.length() == 24) {
+                    JsonArray uploads = invidious.channelVideos(cid, 1);
+                    if (uploads != null) {
+                        String feed = FeedXmlBuilder.buildInvidiousFeed(
+                            uploads, "uploads:" + cid, "Uploads from " + cid);
+                        if (feed.contains("<entry") || invidious.getHealthyCount() > 0) return xml(feed);
+                    }
+                    if (invidious.getHealthyCount() > 0) return xml(emptyFeed("uploads"));
+                }
+
+                if (sub.isEmpty() && invidious.getHealthyCount() > 0) {
+                    JsonObject profile = invidious.channel(cid);
+                    if (profile != null) {
+                        ChannelData channel = ChannelData.fromInvidious(profile, cid);
+                        if (!channel.title.isEmpty() || !channel.videos.isEmpty())
+                            return xml(GDataXmlBuilder.buildChannelEntry(channel));
+                    }
+                    return xml(emptyFeed("user"));
+                }
+
                 String ytPath = "/feeds/api/users/" + cid + (sub.isEmpty() ? "" : "/" + sub);
                 Log.i(TAG, "CHANNEL: " + ytPath);
-                String body = yt2009.fetchText(appendQuery(ytPath, session.getParms()));
-                boolean uploadsRequest = sub.startsWith("uploads");
+                String body = null;
+                if (invidious.getHealthyCount() == 0)
+                    body = yt2009.fetchText(appendQuery(ytPath, session.getParms()));
+
                 if (body != null && !(uploadsRequest && !body.contains("<entry"))) {
                     if (sub.isEmpty() && !cid.startsWith("UC")) {
                         String uc = extractUcIdFromProfile(body);
-                        if (uc != null) {
-                            nameToUc.put(cid, uc);
-                            Log.i(TAG, "Cached '" + cid + "' -> " + uc);
-                        }
+                        if (uc != null) nameToUc.put(cid, uc);
                     }
                     return xml(body);
                 }
-                if (uploadsRequest && cid.startsWith("UC") && cid.length() == 24) {
+
+                if (uploadsRequest && cid.startsWith("UC") && cid.length() == 24
+                        && invidious.getHealthyCount() == 0) {
                     try {
                         ChannelData channel = ChannelData.fromBrowse(innerTube.browse(cid), cid);
-                        if (!channel.videos.isEmpty()) {
+                        if (!channel.videos.isEmpty())
                             return xml(GDataXmlBuilder.buildChannelUploadsFeed(channel));
-                        }
                     } catch (Exception e) {
                         Log.w(TAG, "InnerTube uploads fallback failed: " + e.getMessage());
                     }
-                }
-
-                // fallback 1: попробовать как search по автору (для uploads/favorites)
-                if (!sub.isEmpty() && (sub.startsWith("uploads") || sub.startsWith("favorites"))) {
                     String alt = yt2009.fetchText("/feeds/api/videos?author="
                         + java.net.URLEncoder.encode(cid, "UTF-8"));
-                    if (alt != null && alt.length() > 200 && alt.contains("<entry")) {
-                        Log.i(TAG, "CHANNEL alt OK for " + sub + " via author=" + cid);
-                        return xml(alt);
-                    }
+                    if (alt != null && alt.length() > 200 && alt.contains("<entry")) return xml(alt);
                 }
-                // fallback 2: пустой фид (200), чтобы app не показывал "channel not found"
-                Log.w(TAG, "CHANNEL empty fallback for " + ytPath);
                 return xml(emptyFeed(sub.isEmpty() ? "user" : sub));
             }
 
@@ -331,37 +401,40 @@ public class ProxyServer extends NanoHTTPD {
                 return xml(emptyFeed("resumable"));
             }
 
-            // === /feeds/api/channels/{cid} (app запрашивает) ===
+            // === /feeds/api/channels/{cid} — Invidious first ===
             if (uri.startsWith("/feeds/api/channels/")) {
                 String cid = stripQuery(uri.substring("/feeds/api/channels/".length()));
                 Log.i(TAG, "CHANNELS: " + cid);
-                String body = fetchChannelCached(cid);
-                if (body == null && cid.startsWith("UC") && cid.length() == 24) {
-                    try {
-                        ChannelData channel = ChannelData.fromBrowse(innerTube.browse(cid), cid);
-                        if (!channel.title.isEmpty() || !channel.videos.isEmpty()) {
-                            body = GDataXmlBuilder.buildChannelEntry(channel);
+                String body = null;
+                JsonObject invProfile = invidious.channel(cid);
+                if (invProfile != null) {
+                    ChannelData channel = ChannelData.fromInvidious(invProfile, cid);
+                    if (!channel.title.isEmpty() || !channel.videos.isEmpty())
+                        body = GDataXmlBuilder.buildChannelEntry(channel);
+                }
+                if (body == null && invidious.getHealthyCount() == 0) {
+                    body = fetchChannelCached(cid);
+                    if (body == null && cid.startsWith("UC") && cid.length() == 24) {
+                        try {
+                            ChannelData channel = ChannelData.fromBrowse(innerTube.browse(cid), cid);
+                            if (!channel.title.isEmpty() || !channel.videos.isEmpty())
+                                body = GDataXmlBuilder.buildChannelEntry(channel);
+                        } catch (Exception e) {
+                            Log.w(TAG, "InnerTube channel fallback failed: " + e.getMessage());
                         }
-                    } catch (Exception e) {
-                        Log.w(TAG, "InnerTube channel fallback failed: " + e.getMessage());
                     }
                 }
                 if (body != null) {
                     String uc = extractUcIdFromProfile(body);
-                    if (uc == null || !uc.startsWith("UC") || uc.length() != 24) {
+                    if (uc == null || !uc.startsWith("UC") || uc.length() != 24)
                         uc = (cid.startsWith("UC") && cid.length() == 24) ? cid : "";
-                    }
                     if (!uc.isEmpty()) {
                         StringBuilder inject = new StringBuilder();
-                        if (!body.contains("<link rel=\"self\"")) {
+                        if (!body.contains("<link rel=\"self\""))
                             inject.append("<link rel=\"self\" type=\"application/atom+xml\" href=\"http://127.0.0.1:8080/feeds/api/channels/").append(uc).append("?v=2\"/>");
-                        }
-                        if (!body.contains("<link rel=\"alternate\"")) {
+                        if (!body.contains("<link rel=\"alternate\""))
                             inject.append("<link rel=\"alternate\" type=\"text/html\" href=\"http://127.0.0.1:8080/channel/").append(uc).append("\"/>");
-                        }
-                        if (!body.contains("<yt:channelId>")) {
-                            inject.append("<yt:channelId>").append(uc).append("</yt:channelId>");
-                        }
+                        if (!body.contains("<yt:channelId>")) inject.append("<yt:channelId>").append(uc).append("</yt:channelId>");
                         if (!body.contains("user.uploads")) {
                             inject.append("<gd:feedLink rel=\"http://gdata.youtube.com/schemas/2007#user.uploads\" href=\"http://127.0.0.1:8080/feeds/api/users/").append(uc).append("/uploads\" countHint=\"10\"/>");
                             inject.append("<gd:feedLink rel=\"http://gdata.youtube.com/schemas/2007#user.favorites\" href=\"http://127.0.0.1:8080/feeds/api/users/").append(uc).append("/favorites\" countHint=\"0\"/>");
@@ -432,17 +505,22 @@ public class ProxyServer extends NanoHTTPD {
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "VIDEO PROXY: " + vid);
 
-                java.net.HttpURLConnection yc = yt2009.tryStream(vid, session);
-                if (yc != null) {
-                    Log.i(TAG, "STREAM via yt2009 OK");
-                    return buildStreamResponse(yc);
+                Response invidiousStream = tryInvidiousStream(vid, session);
+                if (invidiousStream != null) return invidiousStream;
+
+                if (invidious.getHealthyCount() == 0) {
+                    java.net.HttpURLConnection yc = yt2009.tryStream(vid, session);
+                    if (yc != null) {
+                        Log.i(TAG, "STREAM via yt2009 fallback OK");
+                        return buildStreamResponse(yc);
+                    }
                 }
 
-                Log.w(TAG, "yt2009 stream failed for " + vid + ", trying InnerTube");
+                Log.w(TAG, "Invidious stream unavailable for " + vid + ", trying InnerTube");
                 Response modernStream = tryInnerTubeStream(vid, session);
                 if (modernStream != null) return modernStream;
 
-                Log.w(TAG, "InnerTube stream unavailable for " + vid + ", returning empty MP4");
+                Log.w(TAG, "All stream sources unavailable for " + vid + ", returning empty MP4");
                 byte[] emptyMp4 = (EMPTY_MP4 != null) ? EMPTY_MP4 : new byte[]{
                     0,0,0,0x18,'f','t','y','p','i','s','o','m',
                     0,0,0x02,0x00,'i','s','o','m','i','s','o','2',
@@ -507,15 +585,18 @@ public class ProxyServer extends NanoHTTPD {
                 if (vid == null) vid = session.getParms().get("v");
                 Log.i(TAG, "LEGACY_STREAM: " + uri + " params=" + session.getParms());
                 if (vid != null && VIDEO_ID.matcher(vid).matches()) {
-                    java.net.HttpURLConnection yc = yt2009.tryStream(vid, session);
-                    if (yc != null) {
-                        Log.i(TAG, "STREAM legacy via yt2009 OK for " + vid);
-                        return buildStreamResponse(yc);
+                    Response invidiousStream = tryInvidiousStream(vid, session);
+                    if (invidiousStream != null) return invidiousStream;
+                    if (invidious.getHealthyCount() == 0) {
+                        java.net.HttpURLConnection yc = yt2009.tryStream(vid, session);
+                        if (yc != null) {
+                            Log.i(TAG, "STREAM legacy via yt2009 fallback OK");
+                            return buildStreamResponse(yc);
+                        }
                     }
-                    Log.w(TAG, "tryStream failed for " + vid + ", trying InnerTube");
+                    Log.w(TAG, "Legacy stream unavailable from Invidious/yt2009; trying InnerTube");
                     Response modernStream = tryInnerTubeStream(vid, session);
-                    if (modernStream != null) return modernStream;
-                } else {
+                    if (modernStream != null) return modernStream;                } else {
                     Log.w(TAG, "LEGACY_STREAM: no video_id in params");
                 }
                 byte[] emptyMp4 = (EMPTY_MP4 != null) ? EMPTY_MP4 : new byte[]{
@@ -543,27 +624,46 @@ public class ProxyServer extends NanoHTTPD {
 
 
 
-    /** Метаданные видео: gvi (title/author/length) + InnerTube (лайки). */
+    /** Metadata priority: fastest healthy Invidious, then yt2009 if the whole pool is down. */
     private VideoData getVideoData(String vid) {
-        VideoData v = new VideoData();
-        v.id = vid;
-        boolean legacyMetadataLoaded = false;
+        VideoData v = null;
+        boolean invidiousMetadataLoaded = false;
         try {
-            Yt2009Client.Info info = yt2009.getVideoInfo(vid);
-            if ("ok".equals(info.status)) {
-                v.title = info.title;
-                v.author = info.author;
-                v.lengthSeconds = info.lengthSeconds;
-                legacyMetadataLoaded = true;
-                Log.i(TAG, "getVideoData: yt2009 OK title='" + v.title + "' author='" + v.author + "'");
-            } else {
-                Log.w(TAG, "getVideoData: yt2009 status=" + info.status);
+            JsonObject data = invidious.video(vid);
+            VideoData fromInvidious = VideoData.fromInvidious(data);
+            if (fromInvidious != null) {
+                v = fromInvidious;
+                invidiousMetadataLoaded = true;
+                Log.i(TAG, "getVideoData: Invidious OK via " + invidious.getFastestHost());
             }
         } catch (Exception e) {
-            Log.e(TAG, "getVideoData: " + e);
+            Log.w(TAG, "getVideoData: Invidious lookup failed: " + e.getMessage());
         }
 
-        if (!legacyMetadataLoaded || v.title.isEmpty() || v.author.isEmpty()) {
+        if (v == null) {
+            v = new VideoData();
+            v.id = vid;
+        }
+
+        boolean legacyMetadataLoaded = false;
+        if (!invidiousMetadataLoaded && invidious.getHealthyCount() == 0) {
+            try {
+                Yt2009Client.Info info = yt2009.getVideoInfo(vid);
+                if ("ok".equals(info.status)) {
+                    v.title = info.title;
+                    v.author = info.author;
+                    v.lengthSeconds = info.lengthSeconds;
+                    legacyMetadataLoaded = true;
+                    Log.i(TAG, "getVideoData: yt2009 fallback OK for " + vid);
+                } else {
+                    Log.w(TAG, "getVideoData: yt2009 fallback status=" + info.status);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "getVideoData: yt2009 fallback failed: " + e);
+            }
+        }
+
+        if (!invidiousMetadataLoaded && !legacyMetadataLoaded) {
             try {
                 VideoData modern = VideoData.fromInnerTube(innerTube.player(vid));
                 if (modern != null) {
@@ -579,31 +679,45 @@ public class ProxyServer extends NanoHTTPD {
                     }
                     if (modern.likeCount > 0) v.likeCount = modern.likeCount;
                     v.isLive = modern.isLive;
-                    Log.i(TAG, "getVideoData: InnerTube fallback used for " + vid);
+                    Log.i(TAG, "getVideoData: InnerTube tertiary fallback used for " + vid);
                 }
             } catch (Exception e) {
                 Log.w(TAG, "getVideoData: InnerTube fallback failed: " + e.getMessage());
             }
         }
 
-        if (v.channelId == null || v.channelId.isEmpty()) {
+        if (v.channelId == null || v.channelId.isEmpty())
             v.channelId = (v.author != null && !v.author.isEmpty()) ? v.author : "";
-        }
-        if (!v.channelId.isEmpty() && (!v.channelId.startsWith("UC") || v.channelId.length() != 24)) {
+
+        if (!v.channelId.isEmpty() && (!v.channelId.startsWith("UC") || v.channelId.length() != 24)
+                && invidious.getHealthyCount() > 0) {
             try {
-                String prof = fetchChannelCached(v.channelId);
-                String uc = (prof != null) ? extractUcIdFromProfile(prof) : null;
-                if (uc != null && uc.startsWith("UC") && uc.length() == 24) {
-                    v.channelId = uc;
-                    Log.i(TAG, "getVideoData: real UC-id " + uc);
-                } else {
-                    Log.w(TAG, "getVideoData: real channel ID unavailable for " + v.author);
-                    v.channelId = (v.author != null) ? v.author : "";
+                JsonArray channels = invidious.searchChannels(v.author);
+                if (channels != null) {
+                    for (int i = 0; i < channels.size(); i++) {
+                        String candidate = VideoData.getStr(channels.get(i).getAsJsonObject(), "authorId", "");
+                        if (candidate.startsWith("UC") && candidate.length() == 24) {
+                            v.channelId = candidate;
+                            break;
+                        }
+                    }
                 }
+            } catch (Exception e) {
+                Log.w(TAG, "Invidious channel-id resolution failed: " + e.getMessage());
+            }
+        } else if (!v.channelId.isEmpty()
+                && (!v.channelId.startsWith("UC") || v.channelId.length() != 24)
+                && invidious.getHealthyCount() == 0) {
+            try {
+                String profile = fetchChannelCached(v.channelId);
+                String uc = (profile != null) ? extractUcIdFromProfile(profile) : null;
+                if (uc != null && uc.startsWith("UC") && uc.length() == 24) v.channelId = uc;
+                else v.channelId = (v.author != null) ? v.author : "";
             } catch (Exception e) {
                 Log.w(TAG, "getVideoData: channel lookup failed for " + v.author, e);
             }
         }
+
         if (v.title == null || v.title.isEmpty()) v.title = vid;
         if (v.author == null || v.author.isEmpty()) v.author = "YouTube";
         if (v.channelId == null || v.channelId.isEmpty()) v.channelId = v.author;
@@ -611,7 +725,27 @@ public class ProxyServer extends NanoHTTPD {
         return v;
     }
 
-
+    private Response tryInvidiousStream(String videoId, IHTTPSession session) {
+        try {
+            JsonObject player = invidious.video(videoId);
+            VideoData video = VideoData.fromInvidious(player);
+            if (video == null || video.streamUrl == null || video.streamUrl.length() == 0) return null;
+            if (!invidious.isTrustedStreamUrl(video.streamUrl)) {
+                Log.w(TAG, "Rejected untrusted Invidious stream URL for " + videoId);
+                return null;
+            }
+            Response response = proxyVideo(video.streamUrl, session);
+            int status = response.getStatus().getRequestStatus();
+            if (status == 200 || status == 206) {
+                Log.i(TAG, "Invidious stream OK for " + videoId + " itag=" + video.itag);
+                return response;
+            }
+            Log.w(TAG, "Invidious stream returned " + status + " for " + videoId);
+        } catch (Exception e) {
+            Log.w(TAG, "Invidious stream failed for " + videoId + ": " + e.getMessage());
+        }
+        return null;
+    }
 
     private Response tryInnerTubeStream(String videoId, IHTTPSession session) {
         try {
@@ -663,20 +797,43 @@ public class ProxyServer extends NanoHTTPD {
     }
 
     private Response handleChannelImage(String cid, String tagName, String redirectFallback) {
-        try {
-            String feed = yt2009.fetchText("/feeds/api/users/" + cid);
-            if (feed != null) {
-                java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("<" + tagName.replace(":", "\\:") + "[^>]*url=['\"]([^'\"]+)['\"]")
-                    .matcher(feed);
-                if (m.find()) {
-                    String url = m.group(1);
-                    if (url.startsWith("//")) url = "http:" + url;
-                    Log.i(TAG, "img from yt2009: " + url);
-                    return proxyImage(url);
+        if (invidious.getHealthyCount() > 0) {
+            try {
+                JsonObject channel = invidious.channel(cid);
+                if (channel != null) {
+                    String key = "media:banner".equals(tagName) ? "authorBanners" : "authorThumbnails";
+                    if (channel.has(key) && channel.get(key).isJsonArray()) {
+                        JsonArray images = channel.getAsJsonArray(key);
+                        if (images.size() > 0) {
+                            JsonObject image = images.get(images.size() - 1).getAsJsonObject();
+                            String url = VideoData.getStr(image, "url", "");
+                            if (url.length() > 0) {
+                                Log.i(TAG, "image from Invidious: " + url);
+                                return proxyImage(url);
+                            }
+                        }
+                    }
                 }
+            } catch (Exception e) {
+                Log.w(TAG, "Invidious channel image failed: " + e.getMessage());
             }
-        } catch (Exception e) {}
+            // Never contact yt2009 while the Invidious pool is healthy.
+        } else {
+            try {
+                String feed = yt2009.fetchText("/feeds/api/users/" + cid);
+                if (feed != null) {
+                    java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("<" + tagName.replace(":", "\\:") + "[^>]*url=['\"]([^'\"]+)['\"]")
+                        .matcher(feed);
+                    if (m.find()) {
+                        String url = m.group(1);
+                        if (url.startsWith("//")) url = "http:" + url;
+                        Log.i(TAG, "img from yt2009 fallback: " + url);
+                        return proxyImage(url);
+                    }
+                }
+            } catch (Exception e) {}
+        }
         if (redirectFallback != null) {
             Response r = newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "");
             r.addHeader("Location", redirectFallback);
@@ -883,9 +1040,14 @@ public class ProxyServer extends NanoHTTPD {
         status.addProperty("version", VERSION);
         status.addProperty("uptimeSeconds", Math.max(0L, (System.currentTimeMillis() - startedAt) / 1000L));
         status.addProperty("requests", requestCount.get());
-        status.addProperty("configuredInstances", yt2009.getConfiguredInstanceCount());
-        status.addProperty("healthyInstances", yt2009.getHealthyInstanceCount());
-        status.addProperty("backend", yt2009.isUsingFallback() ? "fallback" : "instance-pool");
+        status.addProperty("backend", invidious.getHealthyCount() > 0 ? "invidious" : "yt2009-fallback");
+        status.add("invidious", invidious.getStatus());
+
+        JsonObject fallback = new JsonObject();
+        fallback.addProperty("configuredInstances", yt2009.getConfiguredInstanceCount());
+        fallback.addProperty("healthyInstances", yt2009.getHealthyInstanceCount());
+        fallback.addProperty("usingFallback", invidious.getHealthyCount() == 0);
+        status.add("yt2009Fallback", fallback);
 
         JsonObject cache = new JsonObject();
         cache.addProperty("channelEntries", channelCache.size());
@@ -893,11 +1055,12 @@ public class ProxyServer extends NanoHTTPD {
         cache.addProperty("channelMisses", channelCacheMisses.get());
         status.add("cache", cache);
 
-        com.google.gson.JsonArray features = new com.google.gson.JsonArray();
+        JsonArray features = new JsonArray();
+        features.add(new com.google.gson.JsonPrimitive("invidious-primary-fastest-first"));
+        features.add(new com.google.gson.JsonPrimitive("yt2009-last-resort"));
         features.add(new com.google.gson.JsonPrimitive("search-suggestions"));
         features.add(new com.google.gson.JsonPrimitive("playlist-feeds"));
-        features.add(new com.google.gson.JsonPrimitive("InnerTube-stream-fallback"));
-        features.add(new com.google.gson.JsonPrimitive("trending-feed-fallback"));
+        features.add(new com.google.gson.JsonPrimitive("InnerTube-tertiary-stream-fallback"));
         status.add("features", features);
         return json(status.toString());
     }

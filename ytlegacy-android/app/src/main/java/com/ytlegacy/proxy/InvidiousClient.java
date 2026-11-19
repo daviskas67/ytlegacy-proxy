@@ -1,0 +1,423 @@
+package com.ytlegacy.proxy;
+
+import android.util.Log;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Public Invidious API pool. The client probes only instances listed by the
+ * Invidious project and orders them by latency measured on this device.
+ */
+public final class InvidiousClient {
+
+    private static final String TAG = "Invidious";
+    private static final int CONNECT_TIMEOUT_MS = 2500;
+    private static final int READ_TIMEOUT_MS = 5000;
+    private static final long DOWN_TTL_MS = 60000L;
+    private static final long PROBE_INTERVAL_MS = 60000L;
+
+    // Official public instances. inv.nadeko.net, NerdVPN, ChocolateMoo and
+    // tiekoetter are present in the current Invidious documentation list.
+    // f5.si is intentionally omitted: its public monitor reported Cloudflare 530.
+    private static final String[] OFFICIAL_INSTANCES = {
+        "https://invidious.nerdvpn.de",
+        "https://invidious.tiekoetter.com",
+        "https://yt.chocolatemoo53.com",
+        "https://inv.nadeko.net"
+    };
+
+    private final Object lock = new Object();
+    private final List<Server> servers = new ArrayList<Server>();
+    private volatile boolean probing = false;
+    private volatile long lastProbeAt = 0L;
+    private final ThreadLocal<Integer> lastHttpStatus = new ThreadLocal<Integer>() {
+        @Override protected Integer initialValue() { return 0; }
+    };
+
+    public InvidiousClient() {
+        for (int i = 0; i < OFFICIAL_INSTANCES.length; i++) {
+            servers.add(new Server(OFFICIAL_INSTANCES[i], i));
+        }
+    }
+
+    public void refreshInBackground() {
+        synchronized (lock) {
+            if (probing || System.currentTimeMillis() - lastProbeAt < PROBE_INTERVAL_MS) return;
+            probing = true;
+        }
+        Thread worker = new Thread(new Runnable() {
+            @Override public void run() {
+                final CountDownLatch latch = new CountDownLatch(servers.size());
+                for (final Server server : servers) {
+                    Thread probeThread = new Thread(new Runnable() {
+                        @Override public void run() {
+                            long latency = probe(server.base);
+                            synchronized (lock) {
+                                if (latency >= 0L) {
+                                    server.alive = true;
+                                    server.latencyMs = latency;
+                                    server.deadUntil = 0L;
+                                    server.lastSuccess = System.currentTimeMillis();
+                                    server.failures = 0;
+                                    Log.i(TAG, "Probe OK " + server.base + " " + latency + "ms");
+                                } else {
+                                    server.alive = false;
+                                    server.deadUntil = System.currentTimeMillis() + DOWN_TTL_MS;
+                                    Log.w(TAG, "Probe failed " + server.base);
+                                }
+                            }
+                            latch.countDown();
+                        }
+                    }, "invidious-probe");
+                    probeThread.setDaemon(true);
+                    probeThread.start();
+                }
+                try { latch.await(8L, TimeUnit.SECONDS); } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+                synchronized (lock) {
+                    lastProbeAt = System.currentTimeMillis();
+                    probing = false;
+                    Log.i(TAG, "Probe cycle finished: " + getHealthyCountLocked()
+                        + "/" + servers.size() + " healthy; fastest=" + getFastestHostLocked());
+                    lock.notifyAll();
+                }
+            }
+        }, "invidious-probe-cycle");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private long probe(String base) {
+        long start = System.nanoTime();
+        JsonElement body = requestRaw(base, "/api/v1/stats", CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
+        if (body == null || !body.isJsonObject()) return -1L;
+        try {
+            JsonObject stats = body.getAsJsonObject();
+            if (!stats.has("software") || !stats.get("software").isJsonObject()) return -1L;
+            String name = getString(stats.getAsJsonObject("software"), "name", "");
+            if (!"invidious".equalsIgnoreCase(name)) return -1L;
+            return Math.max(1L, (System.nanoTime() - start) / 1000000L);
+        } catch (Exception e) {
+            return -1L;
+        }
+    }
+
+    public JsonArray search(String query) {
+        String q = query == null ? "" : query;
+        JsonElement result = getJson("/api/v1/search?q=" + encode(q) + "&page=1&type=video&region=PL");
+        return result != null && result.isJsonArray() ? result.getAsJsonArray() : null;
+    }
+
+    public JsonArray searchChannels(String query) {
+        String q = query == null ? "" : query;
+        JsonElement result = getJson("/api/v1/search?q=" + encode(q) + "&page=1&type=channel&region=PL");
+        return result != null && result.isJsonArray() ? result.getAsJsonArray() : null;
+    }
+
+    public JsonObject video(String videoId) {
+        JsonElement result = getJson("/api/v1/videos/" + encode(videoId) + "?region=PL");
+        return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
+    }
+
+    public JsonArray trending() {
+        JsonElement result = getJson("/api/v1/trending?type=default&region=PL");
+        return result != null && result.isJsonArray() ? result.getAsJsonArray() : null;
+    }
+
+    public JsonObject playlist(String playlistId, int page) {
+        JsonElement result = getJson("/api/v1/playlists/" + encode(playlistId) + "?page=" + Math.max(1, page));
+        return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
+    }
+
+    public JsonArray channelVideos(String channelId, int page) {
+        JsonElement result = getJson("/api/v1/channels/" + encode(channelId)
+            + "/videos?page=" + Math.max(1, page));
+        if (result != null && result.isJsonArray()) return result.getAsJsonArray();
+        if (result != null && result.isJsonObject()) {
+            JsonObject body = result.getAsJsonObject();
+            if (body.has("videos") && body.get("videos").isJsonArray())
+                return body.getAsJsonArray("videos");
+        }
+        return null;
+    }
+
+    public JsonObject comments(String videoId) {
+        JsonElement result = getJson("/api/v1/comments/" + encode(videoId));
+        return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
+    }
+
+    public boolean isTrustedStreamUrl(String streamUrl) {
+        try {
+            URL url = new URL(streamUrl);
+            if (!"https".equalsIgnoreCase(url.getProtocol())) return false;
+            String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
+            if (host.equals("googlevideo.com") || host.endsWith(".googlevideo.com")) return true;
+            synchronized (lock) {
+                for (Server server : servers) {
+                    String allowed = new URL(server.base).getHost().toLowerCase(java.util.Locale.US);
+                    if (host.equals(allowed)) return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    public JsonObject channel(String channelId) {
+        JsonElement result = getJson("/api/v1/channels/" + encode(channelId));
+        return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
+    }
+
+    private void awaitInitialProbe() {
+        refreshInBackground();
+        long deadline = System.currentTimeMillis() + 6500L;
+        synchronized (lock) {
+            while (probing && lastProbeAt == 0L) {
+                long remaining = deadline - System.currentTimeMillis();
+                if (remaining <= 0L) break;
+                try { lock.wait(Math.min(250L, remaining)); }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+    }
+
+    private JsonElement getJson(String path) {
+        awaitInitialProbe();
+        if (System.currentTimeMillis() - lastProbeAt >= PROBE_INTERVAL_MS)
+            refreshInBackground();
+
+        List<Server> ordered = getOrderedServers();
+        for (Server server : ordered) {
+            synchronized (lock) {
+                if (server.deadUntil > System.currentTimeMillis()) continue;
+            }
+            long start = System.nanoTime();
+            JsonElement result = requestRaw(server.base, path, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
+            long latency = Math.max(1L, (System.nanoTime() - start) / 1000000L);
+            int statusCode = lastHttpStatus.get() == null ? 0 : lastHttpStatus.get().intValue();
+
+            if (result != null) {
+                markResponsive(server, latency);
+                if (!isApiError(result)) return result;
+                // A valid HTTP response with an API-level error means the server is
+                // reachable. Try the next instance, but do not quarantine this host.
+                Log.w(TAG, server.base + " returned an API error for " + path);
+                continue;
+            }
+
+            if (statusCode == 0 || statusCode == 429 || statusCode >= 500 || statusCode == 200) {
+                markFailed(server, "HTTP " + statusCode + " for " + path);
+            } else {
+                // 4xx usually means a missing/private resource, not a dead instance.
+                markResponsive(server, latency);
+                Log.w(TAG, server.base + " returned HTTP " + statusCode + " for " + path);
+            }
+        }
+
+        if (getHealthyCount() == 0) refreshInBackground();
+        return null;
+    }
+
+    private void markResponsive(Server server, long latency) {
+        synchronized (lock) {
+            server.alive = true;
+            server.failures = 0;
+            server.deadUntil = 0L;
+            server.lastSuccess = System.currentTimeMillis();
+            server.latencyMs = smooth(server.latencyMs, latency);
+        }
+    }
+
+    private boolean isApiError(JsonElement result) {
+        if (result == null || result.isJsonNull()) return true;
+        if (result.isJsonObject()) {
+            JsonObject obj = result.getAsJsonObject();
+            if (obj.has("error") && !obj.has("videoId") && !obj.has("videos")) return true;
+        }
+        return false;
+    }
+
+    private void markFailed(Server server, String reason) {
+        synchronized (lock) {
+            server.failures++;
+            server.alive = false;
+            long coolDown = server.failures >= 3 ? 300000L : DOWN_TTL_MS;
+            server.deadUntil = System.currentTimeMillis() + coolDown;
+        }
+        Log.w(TAG, server.base + " marked unavailable: " + reason);
+    }
+
+    private List<Server> getOrderedServers() {
+        final long now = System.currentTimeMillis();
+        List<Server> copy;
+        synchronized (lock) {
+            copy = new ArrayList<Server>(servers);
+        }
+        Collections.sort(copy, new Comparator<Server>() {
+            @Override public int compare(Server a, Server b) {
+                boolean aa = a.alive && a.deadUntil <= now;
+                boolean ba = b.alive && b.deadUntil <= now;
+                if (aa != ba) return aa ? -1 : 1;
+                long al = a.latencyMs <= 0L ? Long.MAX_VALUE : a.latencyMs;
+                long bl = b.latencyMs <= 0L ? Long.MAX_VALUE : b.latencyMs;
+                if (al == bl) return a.order - b.order;
+                return al < bl ? -1 : 1;
+            }
+        });
+        return copy;
+    }
+
+    private JsonElement requestRaw(String base, String path, int connectTimeout, int readTimeout) {
+        HttpURLConnection connection = null;
+        BufferedReader reader = null;
+        lastHttpStatus.set(0);
+        try {
+            URL url = new URL(base + (path.startsWith("/") ? path : "/" + path));
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(connectTimeout);
+            connection.setReadTimeout(readTimeout);
+            connection.setUseCaches(false);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("User-Agent", "ytlegacy-proxy/1.7 Android");
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Accept-Language", "en-US,en;q=0.8");
+            int code = connection.getResponseCode();
+            lastHttpStatus.set(code);
+            if (code != 200) return null;
+
+            InputStream input = connection.getInputStream();
+            reader = new BufferedReader(new InputStreamReader(input, "UTF-8"));
+            StringBuilder raw = new StringBuilder();
+            char[] buffer = new char[4096];
+            int count;
+            while ((count = reader.read(buffer)) != -1) {
+                if (raw.length() + count > 4 * 1024 * 1024) return null;
+                raw.append(buffer, 0, count);
+            }
+            String body = raw.toString().trim();
+            if (body.length() == 0) return null;
+            return new JsonParser().parse(body);
+        } catch (Exception e) {
+            Log.w(TAG, "GET " + base + path + " failed: " + e.getMessage());
+            return null;
+        } finally {
+            if (reader != null) {
+                try { reader.close(); } catch (Exception ignored) {}
+            }
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private String encode(String value) {
+        try { return URLEncoder.encode(value == null ? "" : value, "UTF-8"); }
+        catch (Exception e) { return ""; }
+    }
+
+    private static String getString(JsonObject obj, String key, String fallback) {
+        try {
+            if (obj.has(key) && !obj.get(key).isJsonNull()) return obj.get(key).getAsString();
+        } catch (Exception ignored) {}
+        return fallback;
+    }
+
+    private static long smooth(long previous, long current) {
+        if (previous <= 0L || previous == Long.MAX_VALUE) return current;
+        return (previous * 3L + current) / 4L;
+    }
+
+    private int getHealthyCountLocked() {
+        int count = 0;
+        long now = System.currentTimeMillis();
+        for (Server server : servers) if (server.alive && server.deadUntil <= now) count++;
+        return count;
+    }
+
+    private String getFastestHostLocked() {
+        Server fastest = null;
+        long now = System.currentTimeMillis();
+        for (Server server : servers) {
+            if (!server.alive || server.deadUntil > now) continue;
+            if (fastest == null || server.latencyMs < fastest.latencyMs) fastest = server;
+        }
+        return fastest == null ? "" : fastest.base;
+    }
+
+    public int getConfiguredCount() {
+        synchronized (lock) { return servers.size(); }
+    }
+
+    public int getHealthyCount() {
+        awaitInitialProbe();
+        synchronized (lock) { return getHealthyCountLocked(); }
+    }
+
+    public String getFastestHost() {
+        synchronized (lock) { return getFastestHostLocked(); }
+    }
+
+    public long getFastestLatencyMs() {
+        synchronized (lock) {
+            String host = getFastestHostLocked();
+            for (Server server : servers) if (server.base.equals(host)) return server.latencyMs;
+            return -1L;
+        }
+    }
+
+    public JsonObject getStatus() {
+        JsonObject status = new JsonObject();
+        status.addProperty("configuredInstances", getConfiguredCount());
+        status.addProperty("healthyInstances", getHealthyCount());
+        status.addProperty("fastestHost", getFastestHost());
+        status.addProperty("fastestLatencyMs", getFastestLatencyMs());
+        status.addProperty("probing", probing);
+        status.addProperty("lastProbeAt", lastProbeAt);
+        JsonArray items = new JsonArray();
+        List<Server> snapshot = getOrderedServers();
+        long now = System.currentTimeMillis();
+        for (Server server : snapshot) {
+            JsonObject item = new JsonObject();
+            item.addProperty("host", server.base);
+            item.addProperty("healthy", server.alive && server.deadUntil <= now);
+            item.addProperty("latencyMs", server.latencyMs == Long.MAX_VALUE ? -1L : server.latencyMs);
+            item.addProperty("failures", server.failures);
+            item.addProperty("lastSuccess", server.lastSuccess);
+            items.add(item);
+        }
+        status.add("instances", items);
+        return status;
+    }
+
+    private static final class Server {
+        final String base;
+        final int order;
+        volatile long latencyMs = Long.MAX_VALUE;
+        volatile long deadUntil = 0L;
+        volatile long lastSuccess = 0L;
+        volatile int failures = 0;
+        volatile boolean alive = false;
+
+        Server(String base, int order) {
+            this.base = base;
+            this.order = order;
+        }
+    }
+}

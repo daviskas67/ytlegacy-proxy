@@ -20,6 +20,48 @@ public class ChannelData {
     public String vanityUrl = "";
     public List<VideoData> videos = new ArrayList<>();
 
+    /** Converts the public Invidious channel API response to legacy channel metadata. */
+    public static ChannelData fromInvidious(JsonObject resp, String fallbackId) {
+        ChannelData c = new ChannelData();
+        if (resp == null) return c;
+        c.id = VideoData.getStr(resp, "authorId", fallbackId);
+        c.title = VideoData.getStr(resp, "author", "YouTube");
+        c.description = VideoData.getStr(resp, "description", "");
+        try {
+            if (resp.has("subCount") && !resp.get("subCount").isJsonNull())
+                c.subscriberCount = resp.get("subCount").getAsLong();
+        } catch (Exception ignored) {}
+        try {
+            if (resp.has("videoCount") && !resp.get("videoCount").isJsonNull())
+                c.videoCount = resp.get("videoCount").getAsLong();
+        } catch (Exception ignored) {}
+
+        if (resp.has("authorThumbnails") && resp.get("authorThumbnails").isJsonArray()) {
+            JsonArray thumbs = resp.getAsJsonArray("authorThumbnails");
+            if (thumbs.size() > 0) {
+                JsonObject last = thumbs.get(thumbs.size() - 1).getAsJsonObject();
+                c.avatarUrl = VideoData.getStr(last, "url", "");
+            }
+        }
+        if (resp.has("authorBanners") && resp.get("authorBanners").isJsonArray()) {
+            JsonArray banners = resp.getAsJsonArray("authorBanners");
+            if (banners.size() > 0) {
+                JsonObject last = banners.get(banners.size() - 1).getAsJsonObject();
+                c.bannerUrl = VideoData.getStr(last, "url", "");
+            }
+        }
+        if (resp.has("latestVideos") && resp.get("latestVideos").isJsonArray()) {
+            JsonArray videos = resp.getAsJsonArray("latestVideos");
+            for (int i = 0; i < videos.size(); i++) {
+                try {
+                    VideoData video = VideoData.fromInvidious(videos.get(i).getAsJsonObject());
+                    if (video != null) c.videos.add(video);
+                } catch (Exception ignored) {}
+            }
+        }
+        return c;
+    }
+
     public static ChannelData fromBrowse(JsonObject resp, String channelId) {
         ChannelData c = new ChannelData();
         c.id = channelId;
