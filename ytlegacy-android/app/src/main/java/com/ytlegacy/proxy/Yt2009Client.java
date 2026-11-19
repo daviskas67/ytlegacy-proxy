@@ -25,10 +25,8 @@ public class Yt2009Client {
     private static final String BASE = "http://femboy.email:730";
     private static final String INTERNAL_HOST = "68.172.220.11:730";
     private static final String LOCAL_BASE = "http://127.0.0.1:8080";
-    private final java.util.Map<String, Integer> hitCount = new java.util.concurrent.ConcurrentHashMap<String, Integer>();
-    private static final int HIT_LIMIT = 5;  // после 5 запросов — throttle
     private final java.util.Map<String, Long> failedVideos = new java.util.concurrent.ConcurrentHashMap<String, Long>();
-    private static final long NEG_CACHE_TTL = 600000L;  // 60 сек
+    private static final long NEG_CACHE_TTL = 60000L;  // 60 сек
 
     private List<String> availableInstances = new ArrayList<String>();
     private int currentInstanceIndex = 0;
@@ -208,7 +206,7 @@ public class Yt2009Client {
     public Info getVideoInfo(String videoId) {
         Info info = new Info();
         try {
-            HttpURLConnection c = open("/get_video_info?video_id=" + videoId, null);
+            HttpURLConnection c = openWithFailover("/get_video_info?video_id=" + videoId, null);
             if (c.getResponseCode() != 200) {
                 Log.w(TAG, "gvi HTTP " + c.getResponseCode());
                 return info;
@@ -263,17 +261,7 @@ public class Yt2009Client {
         // негативный кэш: если видео недавно 404/429 — не долбить yt2009
         Long failedAt = failedVideos.get(videoId);
         if (failedAt != null && System.currentTimeMillis() - failedAt < NEG_CACHE_TTL) {
-            Integer cnt = hitCount.get(videoId);
-            int c = (cnt == null) ? 0 : cnt;
-            hitCount.put(videoId, c + 1);
-            if (c < HIT_LIMIT) {
-                Log.i(TAG, "tryStream " + videoId + " skipped (negative cache, hit=" + c + ")");
-            } else if (c == HIT_LIMIT) {
-                Log.w(TAG, "tryStream " + videoId + " throttling (hit=" + c + ")");
-            }
-            if (c >= HIT_LIMIT) {
-                try { Thread.sleep(3000); } catch (InterruptedException ignored) {}
-            }
+            Log.i(TAG, "tryStream " + videoId + " skipped (negative cache)");
             return null;
         }
         // 720p MP4 первым (кэшируется быстро), 240p MP4 как last resort.
@@ -439,7 +427,7 @@ public class Yt2009Client {
                             if (key == null || value == null) continue;
                             String lower = key.toLowerCase(Locale.US);
                             if ("host".equals(lower) || "connection".equals(lower) || "proxy-connection".equals(lower) || "keep-alive".equals(lower) || "transfer-encoding".equals(lower) || "content-length".equals(lower) || "upgrade".equals(lower)) continue;
-                            if ("user-agent".equals(lower) || "accept".equals(lower) || "accept-language".equals(lower) || "range".equals(lower) || "referer".equals(lower) || "origin".equals(lower) || "cookie".equals(lower) || "authorization".equals(lower) || "if-none-match".equals(lower) || "if-modified-since".equals(lower) || "content-type".equals(lower) || lower.startsWith("x-gdata-") || lower.startsWith("x-youtube-")) {
+                            if ("user-agent".equals(lower) || "accept".equals(lower) || "accept-language".equals(lower) || "range".equals(lower) || "referer".equals(lower) || "origin".equals(lower)  || "if-none-match".equals(lower) || "if-modified-since".equals(lower) || "content-type".equals(lower) || lower.startsWith("x-gdata-") || lower.startsWith("x-youtube-")) {
                                 connection.setRequestProperty(key, value);
                             }
                         }

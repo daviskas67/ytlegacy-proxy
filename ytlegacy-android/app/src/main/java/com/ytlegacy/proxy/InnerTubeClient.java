@@ -10,12 +10,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 public class InnerTubeClient {
 
@@ -35,31 +31,17 @@ public class InnerTubeClient {
     }
 
     /**
-     * На старых Android TLS 1.2 не включён по умолчанию для HttpsURLConnection.
-     * Включаем принудительно + игнорируем сертификаты (для старых устройств с устаревшим CA-store).
+     * Uses the platform trust store and the default hostname verifier.
+     * Never accept arbitrary certificates or hostnames.
      */
-    @SuppressWarnings("deprecation")
     private static synchronized void initTls() {
         if (tlsInitialized) return;
         tlsInitialized = true;
         try {
             SSLContext sslContext = SSLContext.getInstance("TLS");
-            sslContext.init(null, new TrustManager[]{
-                new X509TrustManager() {
-                    public void checkClientTrusted(X509Certificate[] chain, String authType) {}
-                    public void checkServerTrusted(X509Certificate[] chain, String authType) {}
-                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                }
-            }, new SecureRandom());
+            sslContext.init(null, null, null);
             HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
-            HttpsURLConnection.setDefaultHostnameVerifier(
-                new javax.net.ssl.HostnameVerifier() {
-                    public boolean verify(String hostname, javax.net.ssl.SSLSession session) {
-                        return true;
-                    }
-                }
-            );
-            Log.i(TAG, "TLS initialized");
+            Log.i(TAG, "TLS initialized with platform certificate validation");
         } catch (Exception e) {
             Log.e(TAG, "TLS init failed: " + e.getMessage());
         }

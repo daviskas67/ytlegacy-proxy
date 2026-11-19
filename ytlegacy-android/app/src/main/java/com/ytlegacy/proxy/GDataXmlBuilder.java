@@ -167,7 +167,6 @@ public class GDataXmlBuilder {
             "    <title>" + titleX + "</title>\n" +
             "    <summary>" + descX + "</summary>\n" +
             "    <link rel=\"self\" type=\"application/atom+xml\" href=\"" + BASE + "/feeds/api/videos/" + v.id + "?v=2\"/>\n" +
-            "    <link rel=\"self\" type=\"application/atom+xml\" href=\"" + BASE + "/feeds/api/videos/" + v.id + "?v=2\"/>\n" +
             "    <link rel=\"alternate\" type=\"text/html\" href=\"" + BASE + "/watch?v=" + v.id + "\"/>\n" +
             "    <link rel=\"http://gdata.youtube.com/schemas/2007#video.related\" type=\"application/atom+xml\" href=\"" + BASE + "/feeds/api/videos/" + v.id + "/related\"/>\n" +
             "    <link rel=\"http://gdata.youtube.com/schemas/2007#video.ratings\" type=\"application/atom+xml\" href=\"" + BASE + "/feeds/api/videos/" + v.id + "/ratings\"/>\n" +

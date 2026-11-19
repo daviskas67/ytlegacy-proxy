@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PROJ="$HOME/ytlegacy/ytlegacy-android"
+PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SDK="/usr/lib/android-sdk"
 BT="$SDK/build-tools/29.0.3"
 PLATFORM="$SDK/platforms/android-30"
@@ -28,15 +28,16 @@ echo "=== 2. Компиляция Java ==="
 rm -rf build/manual
 mkdir -p build/manual/classes build/manual/dex
 
-set -o pipefail
+JAVAC_LOG="build/manual/javac.log"
 if ! javac -source 8 -target 8 \
     -cp "$ANDROID_JAR:libs/gson-2.2.4.jar:libs/nanohttpd-2.3.1.jar" \
     -d build/manual/classes \
-    app/src/main/java/com/ytlegacy/proxy/*.java 2>&1 | grep -v "bootstrap class path"; then
+    app/src/main/java/com/ytlegacy/proxy/*.java >"$JAVAC_LOG" 2>&1; then
+    cat "$JAVAC_LOG"
     echo "!!! JAVAC FAILED — build aborted !!!"
     exit 1
 fi
-set +o pipefail
+grep -v "bootstrap class path" "$JAVAC_LOG" || true
 
 CLASS_COUNT=$(ls build/manual/classes/com/ytlegacy/proxy/*.class 2>/dev/null | wc -l)
 if [ "$CLASS_COUNT" -lt 5 ]; then

@@ -28,7 +28,7 @@ public class ProxyServer extends NanoHTTPD {
     private static final long LIKE_TTL = 600000L;
 
     public ProxyServer() throws IOException {
-        super("0.0.0.0", 8080);
+        super("127.0.0.1", 8080);
         // Загружаем список инстансов в фоне, чтобы не блокировать запуск
         new Thread(new Runnable() {
             public void run() {
@@ -103,7 +103,7 @@ public class ProxyServer extends NanoHTTPD {
                     uri.indexOf("/related")));
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "RELATED: " + vid);
-                String body = yt2009.fetchText("/feeds/api/videos/" + vid + "/related");
+                String body = yt2009.fetchText(appendQuery("/feeds/api/videos/" + vid + "/related", session.getParms()));
                 if (body != null && body.length() >= 2000) return xml(body);
                 Log.w(TAG, "related too small (" + (body != null ? body.length() : 0)
                     + "b), using most_popular as fallback");
@@ -118,7 +118,7 @@ public class ProxyServer extends NanoHTTPD {
                     uri.indexOf("/comments")));
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "COMMENTS: " + vid);
-                String body = yt2009.fetchText("/feeds/api/videos/" + vid + "/comments");
+                String body = yt2009.fetchText(appendQuery("/feeds/api/videos/" + vid + "/comments", session.getParms()));
                 if (body != null) return xml(body);
                 return xml(emptyFeed("comments"));
             }
@@ -142,10 +142,8 @@ public class ProxyServer extends NanoHTTPD {
             if (uri.startsWith("/feeds/api/videos") && !uri.contains("/videos/")) {
                 String query = session.getParms().get("q");
                 if (query == null) query = "";
-                query = query.replace("+", " ").replace("%20", " ");
-                try { query = java.net.URLDecoder.decode(query, "UTF-8"); } catch (Exception e) {}
                 Log.i(TAG, "SEARCH: " + query);
-                String body = yt2009.fetchText("/feeds/api/videos?q=" + URLEncoder.encode(query, "UTF-8"));
+                String body = yt2009.fetchText(appendQuery("/feeds/api/videos", session.getParms()));
                 if (body != null) return xml(body);
                 return xml(emptyFeed("search"));
             }
@@ -153,7 +151,7 @@ public class ProxyServer extends NanoHTTPD {
             // === /feeds/api/standardfeeds/* ===
             if (uri.startsWith("/feeds/api/standardfeeds/")) {
                 Log.i(TAG, "FEED: " + uri);
-                String body = yt2009.fetchText(uri);
+                String body = yt2009.fetchText(appendQuery(uri, session.getParms()));
                 if (body != null) return xml(body);
                 return xml(emptyFeed("feed"));
             }
@@ -198,7 +196,7 @@ public class ProxyServer extends NanoHTTPD {
                 // сначала пробуем как есть
                 String ytPath = "/feeds/api/users/" + cid + (sub.isEmpty() ? "" : "/" + sub);
                 Log.i(TAG, "CHANNEL: " + ytPath);
-                String body = yt2009.fetchText(ytPath);
+                String body = yt2009.fetchText(appendQuery(ytPath, session.getParms()));
                 if (body != null) {
                     // при запросе профиля (без sub) — запоминаем UC-id
                     if (sub.isEmpty() && !cid.startsWith("UC")) {
@@ -339,34 +337,7 @@ public class ProxyServer extends NanoHTTPD {
                     'a','v','c','1','m','p','4','1',
                     0,0,0,0x08,'f','r','e','e',0,0,0,0x00
                 };
-                // Корректная обработка Range: отдаём запрошенный кусок, а не весь файл
-                String rangeHdr = session.getHeaders().get("range");
-                if (rangeHdr != null && rangeHdr.startsWith("bytes=")) {
-                    try {
-                        String spec = rangeHdr.substring(6).split(",")[0].trim();
-                        int dash = spec.indexOf('-');
-                        int rStart = dash > 0 ? Integer.parseInt(spec.substring(0, dash)) : 0;
-                        int rEnd = (dash < spec.length() - 1)
-                            ? Integer.parseInt(spec.substring(dash + 1))
-                            : emptyMp4.length - 1;
-                        if (rEnd >= emptyMp4.length) rEnd = emptyMp4.length - 1;
-                        if (rStart > rEnd) rStart = 0;
-                        int rLen = rEnd - rStart + 1;
-                        byte[] slice = new byte[rLen];
-                        System.arraycopy(emptyMp4, rStart, slice, 0, rLen);
-                        Response er = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT,
-                            "video/mp4", new java.io.ByteArrayInputStream(slice), rLen);
-                        er.addHeader("Content-Range",
-                            "bytes " + rStart + "-" + rEnd + "/" + emptyMp4.length);
-                        er.addHeader("Accept-Ranges", "bytes");
-                        return er;
-                    } catch (Exception ignore) {}
-                }
-                // без Range — полный файл с 200
-                Response er = newFixedLengthResponse(Response.Status.OK,
-                    "video/mp4", new java.io.ByteArrayInputStream(emptyMp4), emptyMp4.length);
-                er.addHeader("Accept-Ranges", "bytes");
-                return er;
+                return emptyMp4Response(emptyMp4, session.getHeaders().get("range"));
             }
 
             // === /vi/{id}/{n}.jpg — превью ===
@@ -439,34 +410,7 @@ public class ProxyServer extends NanoHTTPD {
                     'a','v','c','1','m','p','4','1',
                     0,0,0,0x08,'f','r','e','e',0,0,0,0x00
                 };
-                // Корректная обработка Range: отдаём запрошенный кусок, а не весь файл
-                String rangeHdr = session.getHeaders().get("range");
-                if (rangeHdr != null && rangeHdr.startsWith("bytes=")) {
-                    try {
-                        String spec = rangeHdr.substring(6).split(",")[0].trim();
-                        int dash = spec.indexOf('-');
-                        int rStart = dash > 0 ? Integer.parseInt(spec.substring(0, dash)) : 0;
-                        int rEnd = (dash < spec.length() - 1)
-                            ? Integer.parseInt(spec.substring(dash + 1))
-                            : emptyMp4.length - 1;
-                        if (rEnd >= emptyMp4.length) rEnd = emptyMp4.length - 1;
-                        if (rStart > rEnd) rStart = 0;
-                        int rLen = rEnd - rStart + 1;
-                        byte[] slice = new byte[rLen];
-                        System.arraycopy(emptyMp4, rStart, slice, 0, rLen);
-                        Response er = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT,
-                            "video/mp4", new java.io.ByteArrayInputStream(slice), rLen);
-                        er.addHeader("Content-Range",
-                            "bytes " + rStart + "-" + rEnd + "/" + emptyMp4.length);
-                        er.addHeader("Accept-Ranges", "bytes");
-                        return er;
-                    } catch (Exception ignore) {}
-                }
-                // без Range — полный файл с 200
-                Response er = newFixedLengthResponse(Response.Status.OK,
-                    "video/mp4", new java.io.ByteArrayInputStream(emptyMp4), emptyMp4.length);
-                er.addHeader("Accept-Ranges", "bytes");
-                return er;
+                return emptyMp4Response(emptyMp4, session.getHeaders().get("range"));
             }
 
             Log.w(TAG, "UNHANDLED: " + uri);
@@ -513,11 +457,11 @@ public class ProxyServer extends NanoHTTPD {
                     v.channelId = uc;
                     Log.i(TAG, "getVideoData: real UC-id " + uc);
                 } else {
-                    v.channelId = "UC" + String.format("%022d", Math.abs(v.channelId.hashCode()));
+                    Log.w(TAG, "getVideoData: real channel ID unavailable for " + v.author);
                     Log.i(TAG, "getVideoData: fake UC-id " + v.channelId + " for " + v.author);
                 }
             } catch (Exception e) {
-                v.channelId = "UC" + String.format("%022d", Math.abs(v.channelId.hashCode()));
+                Log.w(TAG, "getVideoData: channel lookup failed for " + v.author, e);
             }
         }
         if (v.title == null || v.title.isEmpty()) v.title = vid;
@@ -686,6 +630,80 @@ public class ProxyServer extends NanoHTTPD {
             Log.e(TAG, "proxyVideo error: " + e);
             return text(Response.Status.INTERNAL_ERROR, "proxy: " + e.getMessage());
         }
+    }
+
+
+    private Response emptyMp4Response(byte[] data, String rangeHeader) {
+        int total = data != null ? data.length : 0;
+        if (rangeHeader == null || !rangeHeader.startsWith("bytes=")) {
+            byte[] body = data != null ? data : new byte[0];
+            Response response = newFixedLengthResponse(Response.Status.OK,
+                "video/mp4", new java.io.ByteArrayInputStream(body), body.length);
+            response.addHeader("Accept-Ranges", "bytes");
+            return response;
+        }
+
+        try {
+            String spec = rangeHeader.substring(6).trim();
+            if (spec.length() == 0 || spec.indexOf(',') >= 0) throw new IllegalArgumentException("Unsupported range");
+            int dash = spec.indexOf('-');
+            if (dash < 0) throw new IllegalArgumentException("Invalid range");
+
+            String first = spec.substring(0, dash).trim();
+            String last = spec.substring(dash + 1).trim();
+            long start;
+            long end;
+
+            if (first.length() == 0) {
+                long suffixLength = Long.parseLong(last);
+                if (suffixLength <= 0 || total == 0) throw new IllegalArgumentException("Invalid suffix range");
+                start = Math.max(0L, (long) total - suffixLength);
+                end = total - 1L;
+            } else {
+                start = Long.parseLong(first);
+                end = last.length() == 0 ? total - 1L : Long.parseLong(last);
+                if (start < 0 || end < start || start >= total) {
+                    throw new IllegalArgumentException("Unsatisfiable range");
+                }
+                if (end >= total) end = total - 1L;
+            }
+
+            if (total == 0 || start < 0 || end < start || start >= total) {
+                throw new IllegalArgumentException("Unsatisfiable range");
+            }
+
+            int length = (int) (end - start + 1L);
+            byte[] slice = new byte[length];
+            System.arraycopy(data, (int) start, slice, 0, length);
+            Response response = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT,
+                "video/mp4", new java.io.ByteArrayInputStream(slice), length);
+            response.addHeader("Content-Range", "bytes " + start + "-" + end + "/" + total);
+            response.addHeader("Accept-Ranges", "bytes");
+            return response;
+        } catch (Exception invalidRange) {
+            Response response = newFixedLengthResponse(Response.Status.RANGE_NOT_SATISFIABLE,
+                "text/plain", "Range Not Satisfiable");
+            response.addHeader("Content-Range", "bytes */" + total);
+            response.addHeader("Accept-Ranges", "bytes");
+            return response;
+        }
+    }
+
+    private String appendQuery(String path, Map<String, String> params) throws java.io.UnsupportedEncodingException {
+        if (params == null || params.isEmpty()) return path;
+        StringBuilder result = new StringBuilder(path);
+        boolean first = path.indexOf('?') < 0;
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key == null || value == null) continue;
+            result.append(first ? '?' : '&');
+            first = false;
+            result.append(URLEncoder.encode(key, "UTF-8"));
+            result.append('=');
+            result.append(URLEncoder.encode(value, "UTF-8"));
+        }
+        return result.toString();
     }
 
     private static String stripQuery(String s) {
