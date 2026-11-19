@@ -20,7 +20,7 @@ public class ProxyServer extends NanoHTTPD {
     private static final String DEVICE_KEY = "XqWdDlb37csu+WU5qX2zR3y3gamS4ITVnK+r0looTM0=";
     private static final String LOCAL_BASE = "http://127.0.0.1:8080";
 
-    private static final String VERSION = "1.7";
+    private static final String VERSION = "1.8";
     private final InvidiousClient invidious = new InvidiousClient();
     private final Yt2009Client yt2009 = new Yt2009Client();
     private final InnerTubeClient innerTube = new InnerTubeClient();
