@@ -305,6 +305,31 @@ public class ProxyServer extends NanoHTTPD {
             if (uri.startsWith("/feeds/api/users/default/")) {
                 String kind = uri.substring("/feeds/api/users/default/".length());
                 if (kind.contains("/")) kind = kind.substring(0, kind.indexOf('/'));
+
+                // A logged-out legacy client has no personal subscriptions.
+                // Fill its subscriptions screen with a useful public discovery feed.
+                if ("subscriptions".equals(kind) || "activity".equals(kind)) {
+                    JsonArray recommendations = invidious.trending();
+                    if (recommendations != null && recommendations.size() > 0) {
+                        return xml(FeedXmlBuilder.buildInvidiousFeed(
+                            recommendations, "default:recommendations", "Recommended videos"));
+                    }
+
+                    if (invidious.getHealthyCount() == 0) {
+                        String popular = yt2009.fetchText("/feeds/api/standardfeeds/most_popular");
+                        if (popular != null && popular.contains("<entry")) return xml(popular);
+                    }
+
+                    // InnerTube is the final feed fallback when the primary API
+                    // cannot supply trending results.
+                    try {
+                        JsonObject modern = innerTube.browse("FEtrending");
+                        String feed = FeedXmlBuilder.buildStandardFeed(modern, "most_popular");
+                        if (feed.contains("<entry")) return xml(feed);
+                    } catch (Exception e) {
+                        Log.w(TAG, "Default recommendations fallback failed: " + e.getMessage());
+                    }
+                }
                 return xml(emptyFeed(kind));
             }
 
@@ -451,11 +476,9 @@ public class ProxyServer extends NanoHTTPD {
                 return xml(emptyFeed("channel"));
             }
 
-            // === /avatar_wait — placeholder аватара (реальный JPEG) ===
+            // === /avatar_wait — neutral placeholder while a channel avatar loads ===
             if (uri.equals("/avatar_wait")) {
-                Response r = proxyImage("http://i1.ytimg.com/vi/dQw4w9WgXcQ/default.jpg");
-                if (r != null) return r;
-                return text(Response.Status.NOT_FOUND, "no avatar");
+                return avatarPlaceholderResponse();
             }
 
             // === /feeds/api/partners/{user}/branding/default ===
@@ -570,7 +593,7 @@ public class ProxyServer extends NanoHTTPD {
             if (uri.startsWith("/channel_avatar/")) {
                 String cid = stripQuery(uri.substring("/channel_avatar/".length()));
                 Log.i(TAG, "AVATAR: " + cid);
-                return handleChannelImage(cid, "media:thumbnail", "http://img.youtube.com/vi/dQw4w9WgXcQ/default.jpg");
+                return handleChannelImage(cid, "media:thumbnail", null);
             }
 
             // === /channel_banner/{cid} ===
@@ -801,20 +824,25 @@ public class ProxyServer extends NanoHTTPD {
     }
 
     private Response handleChannelImage(String cid, String tagName, String redirectFallback) {
+        boolean avatar = "media:thumbnail".equals(tagName);
         if (invidious.getHealthyCount() > 0) {
             try {
                 JsonObject channel = invidious.channel(cid);
                 if (channel != null) {
-                    String key = "media:banner".equals(tagName) ? "authorBanners" : "authorThumbnails";
+                    String key = avatar ? "authorThumbnails" : "authorBanners";
                     if (channel.has(key) && channel.get(key).isJsonArray()) {
                         JsonArray images = channel.getAsJsonArray(key);
-                        if (images.size() > 0) {
-                            JsonObject image = images.get(images.size() - 1).getAsJsonObject();
-                            String url = VideoData.getStr(image, "url", "");
-                            if (url.length() > 0) {
-                                Log.i(TAG, "image from Invidious: " + url);
-                                return proxyImage(url);
-                            }
+                        // Invidious usually returns thumbnails from small to large.
+                        // Try every size so one stale CDN URL does not force a placeholder.
+                        for (int i = images.size() - 1; i >= 0; i--) {
+                            try {
+                                JsonObject image = images.get(i).getAsJsonObject();
+                                String url = VideoData.getStr(image, "url", "");
+                                if (url.length() == 0) continue;
+                                Log.i(TAG, "Invidious channel image candidate: " + url);
+                                Response response = proxyChannelImage(url);
+                                if (response != null) return response;
+                            } catch (Exception ignored) {}
                         }
                     }
                 }
@@ -827,23 +855,77 @@ public class ProxyServer extends NanoHTTPD {
                 String feed = yt2009.fetchText("/feeds/api/users/" + cid);
                 if (feed != null) {
                     java.util.regex.Matcher m = java.util.regex.Pattern
-                        .compile("<" + tagName.replace(":", "\\:") + "[^>]*url=['\"]([^'\"]+)['\"]")
+                        .compile("<" + tagName.replace(":", "\\:") + "[^>]*url=['\\"]([^'\\"]+)['\\"]")
                         .matcher(feed);
                     if (m.find()) {
                         String url = m.group(1);
-                        if (url.startsWith("//")) url = "http:" + url;
+                        if (url.startsWith("//")) url = "https:" + url;
                         Log.i(TAG, "img from yt2009 fallback: " + url);
-                        return proxyImage(url);
+                        Response response = proxyChannelImage(url);
+                        if (response != null) return response;
                     }
                 }
-            } catch (Exception e) {}
+            } catch (Exception e) {
+                Log.w(TAG, "yt2009 channel image failed: " + e.getMessage());
+            }
         }
+
+        if (avatar) return avatarPlaceholderResponse();
         if (redirectFallback != null) {
             Response r = newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "");
             r.addHeader("Location", redirectFallback);
             return r;
         }
         return text(Response.Status.NOT_FOUND, "no image");
+    }
+
+    /** Fetches a channel image without ever substituting an unrelated video thumbnail. */
+    private Response proxyChannelImage(String url) {
+        Response response = proxyImageTry(url);
+        if (response != null) return response;
+
+        String[] hosts = { "yt4.googleusercontent.com", "lh4.googleusercontent.com" };
+        String[] sourceHosts = {
+            "yt3.ggpht.com", "yt4.ggpht.com",
+            "yt3.googleusercontent.com", "lh3.googleusercontent.com"
+        };
+        for (String host : hosts) {
+            String alternate = url;
+            for (String source : sourceHosts) alternate = alternate.replace(source, host);
+            if (!alternate.equals(url)) {
+                response = proxyImageTry(alternate);
+                if (response != null) return response;
+            }
+        }
+        return null;
+    }
+
+    /** A neutral local silhouette used only when a real channel avatar is unavailable. */
+    private Response avatarPlaceholderResponse() {
+        try {
+            android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(
+                96, 96, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
+            android.graphics.Paint paint = new android.graphics.Paint(
+                android.graphics.Paint.ANTI_ALIAS_FLAG);
+            paint.setColor(android.graphics.Color.rgb(232, 235, 239));
+            canvas.drawCircle(48, 48, 48, paint);
+            paint.setColor(android.graphics.Color.rgb(126, 136, 148));
+            canvas.drawCircle(48, 35, 16, paint);
+            canvas.drawOval(new android.graphics.RectF(19, 57, 77, 105), paint);
+
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output);
+            bitmap.recycle();
+            byte[] image = output.toByteArray();
+            Response response = newFixedLengthResponse(Response.Status.OK, "image/png",
+                new java.io.ByteArrayInputStream(image), image.length);
+            response.addHeader("Cache-Control", "public, max-age=3600");
+            return response;
+        } catch (Exception e) {
+            Log.w(TAG, "Avatar placeholder generation failed: " + e.getMessage());
+            return text(Response.Status.NOT_FOUND, "no avatar");
+        }
     }
 
     private Response proxyImage(String url) {
@@ -880,10 +962,8 @@ public class ProxyServer extends NanoHTTPD {
                 if (r != null) return r;
             }
         }
-        // 4) финальный fallback — дефолтная аватарка (i1.ytimg.com c телефона работал)
-        Log.w(TAG, "IMG all failed, default avatar");
-        Response def = proxyImageTry("http://i1.ytimg.com/vi/dQw4w9WgXcQ/default.jpg");
-        if (def != null) return def;
+        // Never substitute an unrelated video thumbnail for the requested image.
+        Log.w(TAG, "IMG all failed: " + url);
         return text(Response.Status.NOT_FOUND, "img all failed");
     }
 
