@@ -107,10 +107,14 @@ public class ProxyServer extends NanoHTTPD {
                 return newFixedLengthResponse(Response.Status.OK, "text/plain", "");
             if (uri.startsWith("/youtube/v3/")) {
                 Log.i(TAG, "YOUTUBE_V3: " + uri);
-                // для players — пустой protobuf (app не крашится)
-                if (uri.startsWith("/youtube/v3/players"))
+                // The legacy client parses these endpoints as protobuf, not JSON.
+                // An empty protobuf response represents an empty/default result
+                // and avoids feeding JSON bytes into the protobuf parser.
+                if (uri.startsWith("/youtube/v3/players")
+                        || uri.startsWith("/youtube/v3/activities")) {
                     return newFixedLengthResponse(Response.Status.OK, "application/x-protobuf", "");
-                // остальные v3 — пустой JSON
+                }
+                // Other v3 endpoints currently use the legacy JSON placeholder.
                 return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"items\":[]}");
             }
             if (uri.startsWith("/schemas/2007/categories.cat"))
