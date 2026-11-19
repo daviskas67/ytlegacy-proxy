@@ -15,13 +15,16 @@ public class ProxyServer extends NanoHTTPD {
 
     private static final String TAG = "ProxyServer";
     private static final Pattern VIDEO_ID = Pattern.compile("^[A-Za-z0-9_-]{11}$");
+    private static final Pattern PLAYLIST_ID = Pattern.compile("^[A-Za-z0-9_-]{10,80}$");
     private static final String DEVICE_KEY = "XqWdDlb37csu+WU5qX2zR3y3gamS4ITVnK+r0looTM0=";
     private static final String LOCAL_BASE = "http://127.0.0.1:8080";
 
-    private static final String VERSION = "1.5";
+    private static final String VERSION = "1.6";
     private final Yt2009Client yt2009 = new Yt2009Client();
     private final InnerTubeClient innerTube = new InnerTubeClient();
     private final AtomicLong requestCount = new AtomicLong();
+    private final AtomicLong channelCacheHits = new AtomicLong();
+    private final AtomicLong channelCacheMisses = new AtomicLong();
     private final long startedAt = System.currentTimeMillis();
     private final java.util.Map<String, String> channelCache = new java.util.concurrent.ConcurrentHashMap<String, String>();
     private final java.util.Map<String, Long> channelCacheTime = new java.util.concurrent.ConcurrentHashMap<String, Long>();
@@ -50,6 +53,32 @@ public class ProxyServer extends NanoHTTPD {
         try {
             // === служебные ===
             if ("/health".equals(uri) || "/api/status".equals(uri)) return healthResponse();
+            if ("/api/cache".equals(uri)) return cacheResponse();
+            if ("/api/cache/clear".equals(uri)) {
+                if (!"POST".equalsIgnoreCase(session.getMethod().name()))
+                    return text(Response.Status.METHOD_NOT_ALLOWED, "Use POST");
+                int cleared = clearLocalCaches();
+                JsonObject result = new JsonObject();
+                result.addProperty("ok", true);
+                result.addProperty("clearedEntries", cleared);
+                return json(result.toString());
+            }
+            if (uri.startsWith("/api/video/")) {
+                String vid = stripQuery(uri.substring("/api/video/".length()));
+                if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
+                VideoData v = getVideoData(vid);
+                JsonObject result = new JsonObject();
+                result.addProperty("id", v.id);
+                result.addProperty("title", v.title);
+                result.addProperty("author", v.author);
+                result.addProperty("channelId", v.channelId);
+                result.addProperty("durationSeconds", v.lengthSeconds);
+                result.addProperty("viewCount", v.viewCount);
+                result.addProperty("likeCount", v.likeCount);
+                result.addProperty("isLive", v.isLive);
+                result.addProperty("isHd", v.isHd);
+                return json(result.toString());
+            }
             if ("/youtube/accounts/registerDevice".equals(uri))
                 return newFixedLengthResponse(Response.Status.OK, "text/plain",
                     "DeviceId=test_device_12345\nDeviceKey=" + DEVICE_KEY);
@@ -57,8 +86,14 @@ public class ProxyServer extends NanoHTTPD {
                 return json("{\"id\":\"test_device_12345\",\"key\":\"dGVzdA==\"}");
             if ("/leanback_ajax".equals(uri))
                 return json("{\"environment\":{\"country\":\"RU\",\"start_time\":1546329600}}");
-            if (uri.startsWith("/complete/search"))
-                return newFixedLengthResponse(Response.Status.OK, "application/json", "[]");
+            if (uri.startsWith("/complete/search")) {
+                String query = session.getParms().get("q");
+                String suggestions = SuggestionClient.fetchJson(query);
+                Response response = newFixedLengthResponse(Response.Status.OK,
+                    "application/json; charset=utf-8", suggestions);
+                response.addHeader("Cache-Control", "public, max-age=45");
+                return response;
+            }
             if (uri.startsWith("/youtubeMusic/v1/")) {
                 Log.i(TAG, "YTMUSIC: " + uri);
                 return json("{\"items\":[]}");
@@ -166,12 +201,51 @@ public class ProxyServer extends NanoHTTPD {
                 return xml(body != null ? body : emptyFeed("search"));
             }
 
+            // === /feeds/api/playlists/{id} — legacy playlist feed ===
+            if (uri.startsWith("/feeds/api/playlists/")) {
+                String playlistPath = stripQuery(uri.substring("/feeds/api/playlists/".length()));
+                boolean videosPath = playlistPath.endsWith("/videos");
+                if (videosPath) playlistPath = playlistPath.substring(0, playlistPath.length() - 7);
+                if (playlistPath.indexOf('/') >= 0)
+                    playlistPath = playlistPath.substring(0, playlistPath.indexOf('/'));
+                if (!PLAYLIST_ID.matcher(playlistPath).matches())
+                    return text(Response.Status.BAD_REQUEST, "Bad playlist id");
+
+                String legacyPath = "/feeds/api/playlists/" + playlistPath
+                    + (videosPath ? "/videos" : "");
+                String body = yt2009.fetchText(appendQuery(legacyPath, session.getParms()));
+                if (body != null && body.contains("<entry")) return xml(body);
+
+                try {
+                    String browseId = playlistPath.startsWith("VL")
+                        ? playlistPath : "VL" + playlistPath;
+                    JsonObject modern = innerTube.browse(browseId);
+                    String modernFeed = FeedXmlBuilder.buildPlaylistFeed(modern, playlistPath);
+                    if (modernFeed.contains("<entry")) return xml(modernFeed);
+                } catch (Exception e) {
+                    Log.w(TAG, "InnerTube playlist fallback failed: " + e.getMessage());
+                }
+                return xml(body != null ? body : emptyFeed("playlist"));
+            }
+
             // === /feeds/api/standardfeeds/* ===
             if (uri.startsWith("/feeds/api/standardfeeds/")) {
                 Log.i(TAG, "FEED: " + uri);
                 String body = yt2009.fetchText(appendQuery(uri, session.getParms()));
-                if (body != null) return xml(body);
-                return xml(emptyFeed("feed"));
+                if (body != null && body.contains("<entry")) return xml(body);
+
+                String feedName = stripQuery(uri.substring("/feeds/api/standardfeeds/".length()));
+                if ("most_popular".equals(feedName) || "top_rated".equals(feedName)
+                        || "recently_featured".equals(feedName)) {
+                    try {
+                        JsonObject modern = innerTube.browse("FEtrending");
+                        String modernFeed = FeedXmlBuilder.buildStandardFeed(modern, feedName);
+                        if (modernFeed.contains("<entry")) return xml(modernFeed);
+                    } catch (Exception e) {
+                        Log.w(TAG, "InnerTube standard feed fallback failed: " + e.getMessage());
+                    }
+                }
+                return xml(body != null ? body : emptyFeed("feed"));
             }
 
             // === /feeds/api/users/default/* ===
@@ -364,7 +438,11 @@ public class ProxyServer extends NanoHTTPD {
                     return buildStreamResponse(yc);
                 }
 
-                Log.w(TAG, "yt2009 stream failed for " + vid + ", returning empty MP4 (prevent crash)");
+                Log.w(TAG, "yt2009 stream failed for " + vid + ", trying InnerTube");
+                Response modernStream = tryInnerTubeStream(vid, session);
+                if (modernStream != null) return modernStream;
+
+                Log.w(TAG, "InnerTube stream unavailable for " + vid + ", returning empty MP4");
                 byte[] emptyMp4 = (EMPTY_MP4 != null) ? EMPTY_MP4 : new byte[]{
                     0,0,0,0x18,'f','t','y','p','i','s','o','m',
                     0,0,0x02,0x00,'i','s','o','m','i','s','o','2',
@@ -434,7 +512,9 @@ public class ProxyServer extends NanoHTTPD {
                         Log.i(TAG, "STREAM legacy via yt2009 OK for " + vid);
                         return buildStreamResponse(yc);
                     }
-                    Log.w(TAG, "tryStream failed for " + vid + ", returning empty MP4");
+                    Log.w(TAG, "tryStream failed for " + vid + ", trying InnerTube");
+                    Response modernStream = tryInnerTubeStream(vid, session);
+                    if (modernStream != null) return modernStream;
                 } else {
                     Log.w(TAG, "LEGACY_STREAM: no video_id in params");
                 }
@@ -532,6 +612,33 @@ public class ProxyServer extends NanoHTTPD {
     }
 
 
+
+    private Response tryInnerTubeStream(String videoId, IHTTPSession session) {
+        try {
+            JsonObject player = innerTube.player(videoId);
+            VideoData modern = VideoData.fromInnerTube(player);
+            if (modern == null || modern.streamUrl == null || modern.streamUrl.isEmpty()) return null;
+
+            java.net.URL streamUrl = new java.net.URL(modern.streamUrl);
+            String host = streamUrl.getHost() == null ? "" : streamUrl.getHost().toLowerCase(java.util.Locale.US);
+            if (!"https".equalsIgnoreCase(streamUrl.getProtocol())
+                    || !(host.equals("googlevideo.com") || host.endsWith(".googlevideo.com"))) {
+                Log.w(TAG, "Rejected non-Google video stream host: " + host);
+                return null;
+            }
+
+            Response response = proxyVideo(modern.streamUrl, session);
+            int status = response.getStatus().getRequestStatus();
+            if (status == 200 || status == 206) {
+                Log.i(TAG, "InnerTube stream OK for " + videoId + " itag=" + modern.itag);
+                return response;
+            }
+            Log.w(TAG, "InnerTube stream returned HTTP " + status + " for " + videoId);
+        } catch (Exception e) {
+            Log.w(TAG, "InnerTube stream fallback failed for " + videoId + ": " + e.getMessage());
+        }
+        return null;
+    }
 
     private Response buildStreamResponse(java.net.HttpURLConnection yc) {
         try {
@@ -779,7 +886,42 @@ public class ProxyServer extends NanoHTTPD {
         status.addProperty("configuredInstances", yt2009.getConfiguredInstanceCount());
         status.addProperty("healthyInstances", yt2009.getHealthyInstanceCount());
         status.addProperty("backend", yt2009.isUsingFallback() ? "fallback" : "instance-pool");
+
+        JsonObject cache = new JsonObject();
+        cache.addProperty("channelEntries", channelCache.size());
+        cache.addProperty("channelHits", channelCacheHits.get());
+        cache.addProperty("channelMisses", channelCacheMisses.get());
+        status.add("cache", cache);
+
+        com.google.gson.JsonArray features = new com.google.gson.JsonArray();
+        features.add(new com.google.gson.JsonPrimitive("search-suggestions"));
+        features.add(new com.google.gson.JsonPrimitive("playlist-feeds"));
+        features.add(new com.google.gson.JsonPrimitive("InnerTube-stream-fallback"));
+        features.add(new com.google.gson.JsonPrimitive("trending-feed-fallback"));
+        status.add("features", features);
         return json(status.toString());
+    }
+
+    private Response cacheResponse() {
+        JsonObject result = new JsonObject();
+        result.addProperty("channelEntries", channelCache.size());
+        result.addProperty("nameMappings", nameToUc.size());
+        result.addProperty("likeEntries", likeCache.size());
+        result.addProperty("channelHits", channelCacheHits.get());
+        result.addProperty("channelMisses", channelCacheMisses.get());
+        result.addProperty("channelTtlMs", CHANNEL_TTL);
+        return json(result.toString());
+    }
+
+    private int clearLocalCaches() {
+        int cleared = channelCache.size() + nameToUc.size()
+            + likeCache.size() + likeCacheTime.size();
+        channelCache.clear();
+        channelCacheTime.clear();
+        nameToUc.clear();
+        likeCache.clear();
+        likeCacheTime.clear();
+        return cleared;
     }
 
     private Response json(String b) {
@@ -850,19 +992,31 @@ public class ProxyServer extends NanoHTTPD {
     private String fetchChannelCached(String cid) {
         long now = System.currentTimeMillis();
         Long ts = channelCacheTime.get(cid);
-        if (ts != null && now - ts < CHANNEL_TTL) {
-            String cached = channelCache.get(cid);
-            if (cached != null) {
+        String cached = channelCache.get(cid);
+        if (ts != null && cached != null) {
+            long ttl = cached.length() == 0 ? 30000L : CHANNEL_TTL;
+            if (now - ts.longValue() < ttl) {
+                channelCacheHits.incrementAndGet();
                 Log.d(TAG, "CHANNEL CACHE HIT: " + cid);
-                return cached;
+                return cached.length() == 0 ? null : cached;
             }
         }
+
+        channelCacheMisses.incrementAndGet();
         String body = yt2009.fetchText("/feeds/api/users/" + cid);
         if (body != null && body.length() > 100) {
+            if (channelCache.size() >= 128) {
+                channelCache.clear();
+                channelCacheTime.clear();
+            }
             channelCache.put(cid, body);
             channelCacheTime.put(cid, now);
+            return body;
         }
-        return body;
+
+        channelCache.put(cid, "");
+        channelCacheTime.put(cid, now);
+        return null;
     }
 
     private String extractUcIdFromProfile(String xmlBody) {

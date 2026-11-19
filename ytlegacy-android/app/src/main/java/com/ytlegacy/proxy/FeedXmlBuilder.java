@@ -30,6 +30,18 @@ public class FeedXmlBuilder {
         return buildVideoFeed(resp, "related:" + videoId, "Related videos");
     }
 
+    public static String buildPlaylistFeed(JsonObject resp, String playlistId) {
+        return buildVideoFeed(resp, "playlist:" + playlistId, "Playlist " + playlistId);
+    }
+
+    public static String buildStandardFeed(JsonObject resp, String feedName) {
+        String title = "Trending videos";
+        if ("most_popular".equals(feedName)) title = "Most popular videos";
+        else if ("top_rated".equals(feedName)) title = "Top rated videos";
+        else if ("recently_featured".equals(feedName)) title = "Recently featured videos";
+        return buildVideoFeed(resp, "standard:" + feedName, title);
+    }
+
     private static String buildVideoFeed(JsonObject resp, String feedId, String feedTitle) {
         StringBuilder entries = new StringBuilder();
         int count = 0;

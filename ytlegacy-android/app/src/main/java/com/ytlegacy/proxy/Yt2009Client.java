@@ -381,7 +381,8 @@ public class Yt2009Client {
     }
 
     public synchronized boolean isUsingFallback() {
-        return availableInstances == null || availableInstances.isEmpty();
+        return availableInstances == null || availableInstances.isEmpty()
+            || getHealthyInstanceCount() == 0;
     }
 
     private synchronized String getActiveInstance() {
