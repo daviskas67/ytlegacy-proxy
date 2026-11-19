@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
 public class ProxyServer extends NanoHTTPD {
@@ -17,7 +18,11 @@ public class ProxyServer extends NanoHTTPD {
     private static final String DEVICE_KEY = "XqWdDlb37csu+WU5qX2zR3y3gamS4ITVnK+r0looTM0=";
     private static final String LOCAL_BASE = "http://127.0.0.1:8080";
 
+    private static final String VERSION = "1.5";
     private final Yt2009Client yt2009 = new Yt2009Client();
+    private final InnerTubeClient innerTube = new InnerTubeClient();
+    private final AtomicLong requestCount = new AtomicLong();
+    private final long startedAt = System.currentTimeMillis();
     private final java.util.Map<String, String> channelCache = new java.util.concurrent.ConcurrentHashMap<String, String>();
     private final java.util.Map<String, Long> channelCacheTime = new java.util.concurrent.ConcurrentHashMap<String, Long>();
     private static final long CHANNEL_TTL = 600000L;
@@ -40,10 +45,11 @@ public class ProxyServer extends NanoHTTPD {
     @Override
     public Response serve(IHTTPSession session) {
         String uri = session.getUri();
+        requestCount.incrementAndGet();
         Log.d(TAG, "REQ " + session.getMethod() + " " + uri);
         try {
             // === служебные ===
-            if ("/health".equals(uri)) return json("{\"ok\":true}");
+            if ("/health".equals(uri) || "/api/status".equals(uri)) return healthResponse();
             if ("/youtube/accounts/registerDevice".equals(uri))
                 return newFixedLengthResponse(Response.Status.OK, "text/plain",
                     "DeviceId=test_device_12345\nDeviceKey=" + DEVICE_KEY);
@@ -104,12 +110,17 @@ public class ProxyServer extends NanoHTTPD {
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "RELATED: " + vid);
                 String body = yt2009.fetchText(appendQuery("/feeds/api/videos/" + vid + "/related", session.getParms()));
-                if (body != null && body.length() >= 2000) return xml(body);
-                Log.w(TAG, "related too small (" + (body != null ? body.length() : 0)
-                    + "b), using most_popular as fallback");
+                if (body != null && body.contains("<entry") && body.length() >= 200) return xml(body);
+                try {
+                    JsonObject next = innerTube.next(vid);
+                    String modernFeed = FeedXmlBuilder.buildRelatedFeed(next, vid);
+                    if (modernFeed.contains("<entry")) return xml(modernFeed);
+                } catch (Exception e) {
+                    Log.w(TAG, "InnerTube related fallback failed: " + e.getMessage());
+                }
                 String pop = yt2009.fetchText("/feeds/api/standardfeeds/most_popular");
-                if (pop != null) return xml(pop);
-                return xml(emptyFeed("related"));
+                if (pop != null && pop.contains("<entry")) return xml(pop);
+                return xml(body != null ? body : emptyFeed("related"));
             }
 
             // === /feeds/api/videos/{id}/comments ===
@@ -144,8 +155,15 @@ public class ProxyServer extends NanoHTTPD {
                 if (query == null) query = "";
                 Log.i(TAG, "SEARCH: " + query);
                 String body = yt2009.fetchText(appendQuery("/feeds/api/videos", session.getParms()));
-                if (body != null) return xml(body);
-                return xml(emptyFeed("search"));
+                if (body != null && body.contains("<entry")) return xml(body);
+                try {
+                    JsonObject modern = innerTube.search(query);
+                    String modernFeed = FeedXmlBuilder.buildSearchFeed(modern, query);
+                    if (modernFeed.contains("<entry")) return xml(modernFeed);
+                } catch (Exception e) {
+                    Log.w(TAG, "InnerTube search fallback failed: " + e.getMessage());
+                }
+                return xml(body != null ? body : emptyFeed("search"));
             }
 
             // === /feeds/api/standardfeeds/* ===
@@ -197,8 +215,8 @@ public class ProxyServer extends NanoHTTPD {
                 String ytPath = "/feeds/api/users/" + cid + (sub.isEmpty() ? "" : "/" + sub);
                 Log.i(TAG, "CHANNEL: " + ytPath);
                 String body = yt2009.fetchText(appendQuery(ytPath, session.getParms()));
-                if (body != null) {
-                    // при запросе профиля (без sub) — запоминаем UC-id
+                boolean uploadsRequest = sub.startsWith("uploads");
+                if (body != null && !(uploadsRequest && !body.contains("<entry"))) {
                     if (sub.isEmpty() && !cid.startsWith("UC")) {
                         String uc = extractUcIdFromProfile(body);
                         if (uc != null) {
@@ -207,6 +225,16 @@ public class ProxyServer extends NanoHTTPD {
                         }
                     }
                     return xml(body);
+                }
+                if (uploadsRequest && cid.startsWith("UC") && cid.length() == 24) {
+                    try {
+                        ChannelData channel = ChannelData.fromBrowse(innerTube.browse(cid), cid);
+                        if (!channel.videos.isEmpty()) {
+                            return xml(GDataXmlBuilder.buildChannelUploadsFeed(channel));
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "InnerTube uploads fallback failed: " + e.getMessage());
+                    }
                 }
 
                 // fallback 1: попробовать как search по автору (для uploads/favorites)
@@ -234,33 +262,39 @@ public class ProxyServer extends NanoHTTPD {
                 String cid = stripQuery(uri.substring("/feeds/api/channels/".length()));
                 Log.i(TAG, "CHANNELS: " + cid);
                 String body = fetchChannelCached(cid);
+                if (body == null && cid.startsWith("UC") && cid.length() == 24) {
+                    try {
+                        ChannelData channel = ChannelData.fromBrowse(innerTube.browse(cid), cid);
+                        if (!channel.title.isEmpty() || !channel.videos.isEmpty()) {
+                            body = GDataXmlBuilder.buildChannelEntry(channel);
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "InnerTube channel fallback failed: " + e.getMessage());
+                    }
+                }
                 if (body != null) {
                     String uc = extractUcIdFromProfile(body);
                     if (uc == null || !uc.startsWith("UC") || uc.length() != 24) {
-                        uc = "UC" + String.format("%022d", Math.abs(cid.hashCode()));
+                        uc = (cid.startsWith("UC") && cid.length() == 24) ? cid : "";
                     }
-                    Log.i(TAG, "CHANNELS: inject A3 links for " + uc);
-
-                    StringBuilder inject = new StringBuilder();
-                    // Astra A3: link rel="self"
-                    if (!body.contains("<link rel=\"self\"")) {
-                        inject.append("<link rel=\"self\" type=\"application/atom+xml\" href=\"http://127.0.0.1:8080/feeds/api/channels/").append(uc).append("?v=2\"/>");
+                    if (!uc.isEmpty()) {
+                        StringBuilder inject = new StringBuilder();
+                        if (!body.contains("<link rel=\"self\"")) {
+                            inject.append("<link rel=\"self\" type=\"application/atom+xml\" href=\"http://127.0.0.1:8080/feeds/api/channels/").append(uc).append("?v=2\"/>");
+                        }
+                        if (!body.contains("<link rel=\"alternate\"")) {
+                            inject.append("<link rel=\"alternate\" type=\"text/html\" href=\"http://127.0.0.1:8080/channel/").append(uc).append("\"/>");
+                        }
+                        if (!body.contains("<yt:channelId>")) {
+                            inject.append("<yt:channelId>").append(uc).append("</yt:channelId>");
+                        }
+                        if (!body.contains("user.uploads")) {
+                            inject.append("<gd:feedLink rel=\"http://gdata.youtube.com/schemas/2007#user.uploads\" href=\"http://127.0.0.1:8080/feeds/api/users/").append(uc).append("/uploads\" countHint=\"10\"/>");
+                            inject.append("<gd:feedLink rel=\"http://gdata.youtube.com/schemas/2007#user.favorites\" href=\"http://127.0.0.1:8080/feeds/api/users/").append(uc).append("/favorites\" countHint=\"0\"/>");
+                            inject.append("<gd:feedLink rel=\"http://gdata.youtube.com/schemas/2007#user.subscriptions\" href=\"http://127.0.0.1:8080/feeds/api/users/").append(uc).append("/subscriptions\" countHint=\"0\"/>");
+                        }
+                        if (inject.length() > 0) body = body.replace("</entry>", inject.toString() + "</entry>");
                     }
-                    // Astra A3: link rel="alternate"
-                    if (!body.contains("<link rel=\"alternate\"")) {
-                        inject.append("<link rel=\"alternate\" type=\"text/html\" href=\"http://127.0.0.1:8080/channel/").append(uc).append("\"/>");
-                    }
-                    // Astra A3: yt:channelId
-                    if (!body.contains("<yt:channelId>")) {
-                        inject.append("<yt:channelId>").append(uc).append("</yt:channelId>");
-                    }
-                    // Astra A3: gd:feedLink
-                    if (!body.contains("user.uploads")) {
-                        inject.append("<gd:feedLink rel=\"http://gdata.youtube.com/schemas/2007#user.uploads\" href=\"http://127.0.0.1:8080/feeds/api/users/").append(uc).append("/uploads\" countHint=\"10\"/>");
-                        inject.append("<gd:feedLink rel=\"http://gdata.youtube.com/schemas/2007#user.favorites\" href=\"http://127.0.0.1:8080/feeds/api/users/").append(uc).append("/favorites\" countHint=\"0\"/>");
-                        inject.append("<gd:feedLink rel=\"http://gdata.youtube.com/schemas/2007#user.subscriptions\" href=\"http://127.0.0.1:8080/feeds/api/users/").append(uc).append("/subscriptions\" countHint=\"0\"/>");
-                    }
-                    body = body.replace("</entry>", inject.toString() + "</entry>");
                     return xml(body);
                 }
                 return xml(emptyFeed("channel"));
@@ -433,12 +467,14 @@ public class ProxyServer extends NanoHTTPD {
     private VideoData getVideoData(String vid) {
         VideoData v = new VideoData();
         v.id = vid;
+        boolean legacyMetadataLoaded = false;
         try {
             Yt2009Client.Info info = yt2009.getVideoInfo(vid);
             if ("ok".equals(info.status)) {
                 v.title = info.title;
                 v.author = info.author;
                 v.lengthSeconds = info.lengthSeconds;
+                legacyMetadataLoaded = true;
                 Log.i(TAG, "getVideoData: yt2009 OK title='" + v.title + "' author='" + v.author + "'");
             } else {
                 Log.w(TAG, "getVideoData: yt2009 status=" + info.status);
@@ -446,10 +482,34 @@ public class ProxyServer extends NanoHTTPD {
         } catch (Exception e) {
             Log.e(TAG, "getVideoData: " + e);
         }
-        // channelId = author (имя). App пойдёт на /feeds/api/users/{author} -> yt2009
-        v.channelId = (v.author != null && !v.author.isEmpty()) ? v.author : "";
-        // yt2009 не даёт UC-id -> генерим fake UC-id из хеша имени (валидный формат)
-        if (!v.channelId.startsWith("UC") || v.channelId.length() != 24) {
+
+        if (!legacyMetadataLoaded || v.title.isEmpty() || v.author.isEmpty()) {
+            try {
+                VideoData modern = VideoData.fromInnerTube(innerTube.player(vid));
+                if (modern != null) {
+                    if (v.title.isEmpty()) v.title = modern.title;
+                    if (v.author.isEmpty()) v.author = modern.author;
+                    if (v.channelId.isEmpty()) v.channelId = modern.channelId;
+                    if (v.lengthSeconds <= 0) v.lengthSeconds = modern.lengthSeconds;
+                    if (v.viewCount <= 0) v.viewCount = modern.viewCount;
+                    if (v.description.isEmpty()) v.description = modern.description;
+                    if (v.published == null || v.published.startsWith("2013-")) {
+                        v.published = modern.published;
+                        v.uploadDate = modern.uploadDate;
+                    }
+                    if (modern.likeCount > 0) v.likeCount = modern.likeCount;
+                    v.isLive = modern.isLive;
+                    Log.i(TAG, "getVideoData: InnerTube fallback used for " + vid);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "getVideoData: InnerTube fallback failed: " + e.getMessage());
+            }
+        }
+
+        if (v.channelId == null || v.channelId.isEmpty()) {
+            v.channelId = (v.author != null && !v.author.isEmpty()) ? v.author : "";
+        }
+        if (!v.channelId.isEmpty() && (!v.channelId.startsWith("UC") || v.channelId.length() != 24)) {
             try {
                 String prof = fetchChannelCached(v.channelId);
                 String uc = (prof != null) ? extractUcIdFromProfile(prof) : null;
@@ -458,7 +518,7 @@ public class ProxyServer extends NanoHTTPD {
                     Log.i(TAG, "getVideoData: real UC-id " + uc);
                 } else {
                     Log.w(TAG, "getVideoData: real channel ID unavailable for " + v.author);
-                    Log.i(TAG, "getVideoData: fake UC-id " + v.channelId + " for " + v.author);
+                    v.channelId = (v.author != null) ? v.author : "";
                 }
             } catch (Exception e) {
                 Log.w(TAG, "getVideoData: channel lookup failed for " + v.author, e);
@@ -467,7 +527,6 @@ public class ProxyServer extends NanoHTTPD {
         if (v.title == null || v.title.isEmpty()) v.title = vid;
         if (v.author == null || v.author.isEmpty()) v.author = "YouTube";
         if (v.channelId == null || v.channelId.isEmpty()) v.channelId = v.author;
-        v.likeCount = 0;
         Log.i(TAG, "getVideoData: id=" + v.id + " title='" + v.title + "' ch='" + v.channelId + "'");
         return v;
     }
@@ -709,6 +768,18 @@ public class ProxyServer extends NanoHTTPD {
     private static String stripQuery(String s) {
         int q = s.indexOf('?');
         return q >= 0 ? s.substring(0, q) : s;
+    }
+
+    private Response healthResponse() {
+        JsonObject status = new JsonObject();
+        status.addProperty("ok", true);
+        status.addProperty("version", VERSION);
+        status.addProperty("uptimeSeconds", Math.max(0L, (System.currentTimeMillis() - startedAt) / 1000L));
+        status.addProperty("requests", requestCount.get());
+        status.addProperty("configuredInstances", yt2009.getConfiguredInstanceCount());
+        status.addProperty("healthyInstances", yt2009.getHealthyInstanceCount());
+        status.addProperty("backend", yt2009.isUsingFallback() ? "fallback" : "instance-pool");
+        return json(status.toString());
     }
 
     private Response json(String b) {

@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Build;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -78,12 +79,18 @@ public class MainActivity extends Activity {
         copyButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                if (clipboard != null) {
-                    ClipData clip = ClipData.newPlainText("Proxy address", "127.0.0.1:8080");
-                    clipboard.setPrimaryClip(clip);
-                    Toast.makeText(MainActivity.this, "Copied!", Toast.LENGTH_SHORT).show();
+                if (Build.VERSION.SDK_INT >= 11) {
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (clipboard != null) {
+                        ClipData clip = ClipData.newPlainText("Proxy address", "127.0.0.1:8080");
+                        clipboard.setPrimaryClip(clip);
+                    }
+                } else {
+                    android.text.ClipboardManager clipboard =
+                        (android.text.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (clipboard != null) clipboard.setText("127.0.0.1:8080");
                 }
+                Toast.makeText(MainActivity.this, "Copied!", Toast.LENGTH_SHORT).show();
             }
         });
         layout.addView(copyButton, new LinearLayout.LayoutParams(

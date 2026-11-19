@@ -23,34 +23,43 @@ public class FeedXmlBuilder {
     };
 
     public static String buildSearchFeed(JsonObject resp, String query) {
+        return buildVideoFeed(resp, "search:" + query, "Search results for " + query);
+    }
+
+    public static String buildRelatedFeed(JsonObject resp, String videoId) {
+        return buildVideoFeed(resp, "related:" + videoId, "Related videos");
+    }
+
+    private static String buildVideoFeed(JsonObject resp, String feedId, String feedTitle) {
         StringBuilder entries = new StringBuilder();
         int count = 0;
-
         try {
             JsonArray videos = extractVideoRenderers(resp);
-            Log.i(TAG, "Extracted " + videos.size() + " video renderers for '" + query + "'");
+            Log.i(TAG, "Extracted " + videos.size() + " video renderers for feed " + feedId);
+            java.util.HashSet<String> seen = new java.util.HashSet<String>();
             for (int i = 0; i < videos.size() && count < 20; i++) {
                 JsonObject vr = videos.get(i).getAsJsonObject();
                 String entry = renderVideoEntry(vr);
                 if (entry != null) {
-                    entries.append(entry);
-                    count++;
+                    String id = getStr(vr, "videoId");
+                    if (id.isEmpty() || seen.add(id)) {
+                        entries.append(entry);
+                        count++;
+                    }
                 }
             }
         } catch (Exception e) {
             Log.e(TAG, "Parse error: " + e.getMessage());
         }
-
         Log.i(TAG, "Built feed with " + count + " entries");
-        String title = esc("Search results for " + query);
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
             "<feed xmlns=\"http://www.w3.org/2005/Atom\" " +
             "xmlns:media=\"http://search.yahoo.com/mrss/\" " +
             "xmlns:yt=\"http://gdata.youtube.com/schemas/2007\" " +
             "xmlns:openSearch=\"http://a9.com/-/spec/opensearch/1.1/\" " +
             "xmlns:gd=\"http://schemas.google.com/g/2005\">\n" +
-            "  <id>tag:youtube.com,2008:feed:search:" + esc(query) + "</id>\n" +
-            "  <title>" + title + "</title>\n" +
+            "  <id>tag:youtube.com,2008:feed:" + esc(feedId) + "</id>\n" +
+            "  <title>" + esc(feedTitle) + "</title>\n" +
             "  <openSearch:totalResults>" + count + "</openSearch:totalResults>\n" +
             "  <openSearch:startIndex>1</openSearch:startIndex>\n" +
             "  <openSearch:itemsPerPage>" + count + "</openSearch:itemsPerPage>\n" +

@@ -17,6 +17,7 @@ public class ProxyService extends Service {
     private static final int NOTIFICATION_ID = 1;
 
     private ProxyServer server;
+    private boolean serverStarted = false;
 
     @Override
     public void onCreate() {
@@ -34,9 +35,15 @@ public class ProxyService extends Service {
             server = new ProxyServer();
             server.initEmptyMp4(getApplicationContext());
             server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
+            serverStarted = true;
             Log.i(TAG, "Proxy server started on 127.0.0.1:8080");
-        } catch (IOException e) {
-            Log.e(TAG, "Failed to start server: " + e.getMessage());
+        } catch (Exception e) {
+            serverStarted = false;
+            Log.e(TAG, "Failed to start server: " + e.getMessage(), e);
+            if (server != null) {
+                try { server.stop(); } catch (Exception ignored) {}
+                server = null;
+            }
         }
     }
 
@@ -46,14 +53,15 @@ public class ProxyService extends Service {
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, 0);
 
         if (Build.VERSION.SDK_INT >= 11) {
-            // API 11+ (Honeycomb+): Notification.Builder
-            return new Notification.Builder(this)
-                .setContentTitle("ytlegacy-proxy")
+            // Notification.Builder.build() exists from API 16; API 11-15 use getNotification().
+            Notification.Builder builder = new Notification.Builder(this)
+                .setContentTitle("ytlegacy-proxy 1.5")
                 .setContentText("Server running on 127.0.0.1:8080")
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .build();
+                .setOngoing(true);
+            if (Build.VERSION.SDK_INT >= 16) return builder.build();
+            return builder.getNotification();
         } else {
             // API 8-10 (Froyo/Gingerbread): raw Notification + setLatestEventInfo
             Notification n = new Notification(
@@ -83,12 +91,19 @@ public class ProxyService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!serverStarted) {
+            Log.e(TAG, "Service will stop because the local proxy did not start");
+            stopSelf(startId);
+            return START_NOT_STICKY;
+        }
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        serverStarted = false;
         if (server != null) server.stop();
+        server = null;
         super.onDestroy();
     }
 

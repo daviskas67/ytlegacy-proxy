@@ -80,8 +80,8 @@ echo "=== 5. Сборка базового APK ==="
     --manifest app/src/main/AndroidManifest.xml \
     --min-sdk-version 8 \
     --target-sdk-version 19 \
-    --version-code 1 \
-    --version-name "1.0" \
+    --version-code 2 \
+    --version-name "1.5" \
     -I "$ANDROID_JAR" \
     -R build/manual/res.zip \
     --auto-add-overlay

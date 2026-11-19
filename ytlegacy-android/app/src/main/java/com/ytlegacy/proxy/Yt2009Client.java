@@ -65,24 +65,19 @@ public class Yt2009Client {
 
     /** Passthrough: тянет текст с yt2009 и переписывает URL на локальные. Возвращает null при ошибке. */
     public String fetchText(String path) {
-        // retry 2 раза — yt2009 иногда рвёт соединение под нагрузкой
         for (int attempt = 1; attempt <= 2; attempt++) {
+            HttpURLConnection connection = null;
             try {
-                HttpURLConnection c = openWithFailover(path, null);
-                int code = c.getResponseCode();
+                connection = openWithFailover(path, null);
+                if (connection == null) continue;
+                int code = connection.getResponseCode();
                 if (code != 200) {
                     Log.w(TAG, "fetch " + path + " -> HTTP " + code + " (attempt " + attempt + ")");
-                    if (attempt == 2) return null;
                     continue;
                 }
-                String body = readBody(c);
-                if (body == null || body.isEmpty()) {
-                    Log.w(TAG, "fetch " + path + " empty body (attempt " + attempt + ")");
-                    if (attempt == 2) return null;
-                    continue;
-                }
-                String original = body;
-                String rewritten = rewriteUrls(original);
+                String body = readBody(connection);
+                if (body == null || body.isEmpty()) continue;
+                String rewritten = rewriteUrls(body);
                 int viUrls = countOccurrences(rewritten, LOCAL_BASE + "/vi/");
                 int imgUrls = countOccurrences(rewritten, LOCAL_BASE + "/img/");
                 int leftYtimg = countOccurrences(rewritten, "ytimg") + countOccurrences(rewritten, "img.youtube");
@@ -95,32 +90,35 @@ public class Yt2009Client {
                 Log.w(TAG, "fetch " + path + " timeout (attempt " + attempt + ")");
             } catch (Exception e) {
                 Log.e(TAG, "fetch " + path + " error (attempt " + attempt + "): " + e);
-                if (attempt == 2) return null;
+            } finally {
+                if (connection != null) connection.disconnect();
             }
         }
         Log.e(TAG, "fetch " + path + " FAILED after 2 attempts");
         return null;
     }
 
-    /** Читает тело ответа блоками через Content-Length (или до EOF), обходя проблемы chunked. */
+    private static final int MAX_TEXT_RESPONSE_BYTES = 8 * 1024 * 1024;
+
     private String readBody(HttpURLConnection c) throws Exception {
-        java.io.InputStream is = new java.io.BufferedInputStream(c.getInputStream(), 8192);
         long contentLength = c.getContentLength();
+        if (contentLength > MAX_TEXT_RESPONSE_BYTES) {
+            throw new java.io.IOException("Response exceeds " + MAX_TEXT_RESPONSE_BYTES + " bytes");
+        }
+        java.io.InputStream is = new java.io.BufferedInputStream(c.getInputStream(), 8192);
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
         byte[] buf = new byte[8192];
         int n;
-        if (contentLength > 0) {
-            long total = 0;
-            while (total < contentLength && (n = is.read(buf)) != -1) {
-                bos.write(buf, 0, n);
-                total += n;
-            }
-        } else {
+        try {
             while ((n = is.read(buf)) != -1) {
+                if (bos.size() + n > MAX_TEXT_RESPONSE_BYTES) {
+                    throw new java.io.IOException("Response exceeds " + MAX_TEXT_RESPONSE_BYTES + " bytes");
+                }
                 bos.write(buf, 0, n);
             }
+        } finally {
+            is.close();
         }
-        is.close();
         return new String(bos.toByteArray(), "UTF-8");
     }
 
@@ -288,17 +286,13 @@ public class Yt2009Client {
                     // strip cache-buster ?ac=... — иначе yt2009 перегенерирует файл каждый раз
                     loc = loc.replaceAll("[?&]ac=[^&]*", "");
                     c.disconnect();
-                    if (loc.startsWith("/")) {
-                        c = open(loc, session);
-                    } else {
-                        java.net.URL abs = new java.net.URL(loc);
-                        c = (HttpURLConnection) abs.openConnection();
-                        c.setConnectTimeout(10000);
-                        c.setReadTimeout(120000);
-                        c.setRequestProperty("User-Agent", BROWSER_UA);
-                        String range = session.getHeaders().get("range");
-                        if (range != null) c.setRequestProperty("Range", range);
-                    }
+                    java.net.URL resolved = new java.net.URL(c.getURL(), loc);
+                    c = (HttpURLConnection) resolved.openConnection();
+                    c.setConnectTimeout(10000);
+                    c.setReadTimeout(120000);
+                    c.setRequestProperty("User-Agent", BROWSER_UA);
+                    String range = session.getHeaders().get("range");
+                    if (range != null) c.setRequestProperty("Range", range);
                     code = c.getResponseCode();
                     hops++;
                     Log.i(TAG, "  hop " + hops + " -> HTTP " + code);
@@ -371,6 +365,25 @@ public class Yt2009Client {
         }
     }
 
+    public synchronized int getConfiguredInstanceCount() {
+        return availableInstances == null ? 0 : availableInstances.size();
+    }
+
+    public synchronized int getHealthyInstanceCount() {
+        if (availableInstances == null || availableInstances.isEmpty()) return 0;
+        long now = System.currentTimeMillis();
+        int healthy = 0;
+        for (String instance : availableInstances) {
+            Long deadAt = deadInstances.get(instance);
+            if (deadAt == null || now - deadAt.longValue() >= DEAD_TTL) healthy++;
+        }
+        return healthy;
+    }
+
+    public synchronized boolean isUsingFallback() {
+        return availableInstances == null || availableInstances.isEmpty();
+    }
+
     private synchronized String getActiveInstance() {
         if (availableInstances == null || availableInstances.isEmpty()) return FALLBACK_INSTANCE;
         long now = System.currentTimeMillis();
@@ -437,7 +450,7 @@ public class Yt2009Client {
                 int responseCode = connection.getResponseCode();
                 if (responseCode == 200 || responseCode == 206) return connection;
 
-                if (responseCode == 404 || responseCode == 429) {
+                if (responseCode == 429 || responseCode >= 500) {
                     synchronized (this) {
                         deadInstances.put(instance, System.currentTimeMillis());
                         if (availableInstances != null && !availableInstances.isEmpty()) {
