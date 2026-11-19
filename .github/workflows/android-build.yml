@@ -61,3 +61,18 @@ jobs:
               --title "ytlegacy-proxy v1.6" \
               --generate-notes
           fi
+
+      - name: Publish v1.7 GitHub Release
+        if: github.event_name == 'push' && github.event.head_commit.message == 'release v1.7'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk"
+          if gh release view v1.7 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.7 "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v1.7 "$APK" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "ytlegacy-proxy v1.7" \
+              --generate-notes
+          fi
