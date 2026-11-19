@@ -11,6 +11,12 @@
 
 ## Русский
 
+### v1.8
+
+- Реальные аватары каналов загружаются из Invidious; перед переходом к заглушке проверяются доступные размеры изображения.
+- Rick Astley удалён из резервных изображений. Вместо него используется нейтральная иконка профиля.
+- Пустая лента подписок для неавторизованного клиента заполняется популярными видео из Invidious.
+
 ### О проекте
 
 **ytlegacy-proxy** — Android-приложение, которое выступает промежуточным сервером между модифицированным клиентом YouTube 5.0.21 и современными источниками данных. Оно принимает старые запросы в формате YouTube GData/Atom и преобразует ответы Invidious в формат, который понимает клиент.
@@ -90,7 +96,7 @@ gradle --no-daemon :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.7-debug` (доступен 14 дней) и публикует сборку v1.7 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.7).
+GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.8-debug` (доступен 14 дней) и публикует сборку v1.7 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.7).
 
 Дополнительный скрипт `build-manual.sh` рассчитан на окружения, где уже доступны Android SDK tools, D8, Gson 2.2.4 и NanoHTTPD 2.3.1 JAR-файлы.
 
@@ -142,6 +148,12 @@ Invidious — неофициальный API совместимости. Пуб�
 <a id="english"></a>
 
 ## English
+
+### v1.8
+
+- Channel avatars are fetched from Invidious, trying available image sizes before falling back.
+- The Rick Astley image fallback is removed and replaced with a neutral profile icon.
+- The empty subscriptions feed for a signed-out client is populated with popular Invidious videos.
 
 ### About
 
@@ -222,7 +234,7 @@ The APK is generated at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.7-debug` artifact (available for 14 days) and publishes the v1.7 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.7).
+GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.8-debug` artifact (available for 14 days) and publishes the v1.7 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.7).
 
 The optional `build-manual.sh` script is intended for environments that already provide Android SDK tools, D8, Gson 2.2.4, and NanoHTTPD 2.3.1 JARs.
 
