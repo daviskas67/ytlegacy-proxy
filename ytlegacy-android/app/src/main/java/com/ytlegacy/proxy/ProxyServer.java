@@ -1092,50 +1092,68 @@ public class ProxyServer extends NanoHTTPD {
         return text(Response.Status.NOT_FOUND, "img all failed");
     }
 
+    private static boolean isAllowedImageUrl(java.net.URL url) {
+        if (url == null || !"https".equalsIgnoreCase(url.getProtocol())) return false;
+        if (url.getUserInfo() != null || (url.getPort() != -1 && url.getPort() != 443)) return false;
+        String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
+        return host.equals("img.youtube.com")
+            || host.endsWith(".ytimg.com") || host.equals("ytimg.com")
+            || host.endsWith(".ggpht.com") || host.equals("ggpht.com")
+            || host.endsWith(".googleusercontent.com") || host.equals("googleusercontent.com");
+    }
+
     private Response proxyImageTry(String rawUrl) {
         HttpURLConnection connection = null;
         boolean handedOff = false;
         try {
-            java.net.URL url = new java.net.URL(rawUrl);
-            String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
-            boolean allowedHost = host.equals("img.youtube.com")
-                || host.endsWith(".ytimg.com") || host.equals("ytimg.com")
-                || host.endsWith(".ggpht.com") || host.equals("ggpht.com")
-                || host.endsWith(".googleusercontent.com") || host.equals("googleusercontent.com");
-            if (!"https".equalsIgnoreCase(url.getProtocol()) || !allowedHost) {
-                Log.w(TAG, "Rejected image URL outside HTTPS image allowlist: " + rawUrl);
-                return null;
-            }
+            java.net.URL currentUrl = new java.net.URL(rawUrl);
+            for (int redirects = 0; redirects <= 4; redirects++) {
+                if (!isAllowedImageUrl(currentUrl)) {
+                    Log.w(TAG, "Rejected image redirect outside HTTPS allowlist: " + currentUrl);
+                    return null;
+                }
 
-            connection = (HttpURLConnection) url.openConnection();
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(15000);
-            connection.setRequestProperty("User-Agent",
-                "Mozilla/5.0 (Linux; Android 4.4) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
-            connection.setRequestProperty("Accept", "image/*,*/*;q=0.8");
-            connection.setInstanceFollowRedirects(true);
-            int code = connection.getResponseCode();
-            if (code != HttpURLConnection.HTTP_OK) return null;
+                connection = (HttpURLConnection) currentUrl.openConnection();
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(15000);
+                connection.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Linux; Android 4.4) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+                connection.setRequestProperty("Accept", "image/*,*/*;q=0.8");
+                connection.setInstanceFollowRedirects(false);
+                int code = connection.getResponseCode();
 
-            String contentType = connection.getContentType();
-            if (contentType == null || !contentType.toLowerCase(java.util.Locale.US).startsWith("image/")) {
-                Log.w(TAG, "Rejected non-image response from " + rawUrl + ": " + contentType);
-                return null;
-            }
-            int length = connection.getContentLength();
-            if (length > 16 * 1024 * 1024) {
-                Log.w(TAG, "Rejected oversized image response: " + length);
-                return null;
-            }
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String location = connection.getHeaderField("Location");
+                    if (location == null || location.trim().length() == 0 || redirects == 4) return null;
+                    java.net.URL redirectUrl = new java.net.URL(currentUrl, location);
+                    connection.disconnect();
+                    connection = null;
+                    currentUrl = redirectUrl;
+                    continue;
+                }
+                if (code != HttpURLConnection.HTTP_OK) return null;
 
-            java.io.InputStream input = disconnectingStream(connection, connection.getInputStream());
-            Response response = length >= 0
-                ? newFixedLengthResponse(Response.Status.OK, contentType, input, length)
-                : newChunkedResponse(Response.Status.OK, contentType, input);
-            response.addHeader("Cache-Control", "public, max-age=86400");
-            handedOff = true;
-            Log.i(TAG, "IMG OK: " + rawUrl + " (" + length + "b)");
-            return response;
+                String contentType = connection.getContentType();
+                if (contentType == null || !contentType.toLowerCase(java.util.Locale.US).startsWith("image/")) {
+                    Log.w(TAG, "Rejected non-image response from " + currentUrl + ": " + contentType);
+                    return null;
+                }
+                int length = connection.getContentLength();
+                if (length > 16 * 1024 * 1024) {
+                    Log.w(TAG, "Rejected oversized image response: " + length);
+                    return null;
+                }
+
+                java.io.InputStream input = disconnectingStream(connection, connection.getInputStream());
+                Response response = length >= 0
+                    ? newFixedLengthResponse(Response.Status.OK, contentType, input, length)
+                    : newChunkedResponse(Response.Status.OK, contentType, input);
+                response.addHeader("Cache-Control", "public, max-age=86400");
+                handedOff = true;
+                Log.i(TAG, "IMG OK: " + currentUrl + " (" + length + "b)");
+                return response;
+            }
+            return null;
         } catch (Exception e) {
             Log.w(TAG, "IMG err: " + rawUrl + " -> " + e.getClass().getSimpleName());
             return null;
@@ -1144,58 +1162,80 @@ public class ProxyServer extends NanoHTTPD {
         }
     }
 
+    private boolean isTrustedVideoUrl(java.net.URL url) {
+        if (url == null || !"https".equalsIgnoreCase(url.getProtocol())) return false;
+        if (url.getUserInfo() != null || (url.getPort() != -1 && url.getPort() != 443)) return false;
+        String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
+        boolean googleVideo = host.equals("googlevideo.com") || host.endsWith(".googlevideo.com");
+        return googleVideo || invidious.isTrustedStreamUrl(url.toString());
+    }
+
     private Response proxyVideo(String rawUrl, IHTTPSession session) {
         HttpURLConnection connection = null;
         boolean handedOff = false;
         try {
-            java.net.URL url = new java.net.URL(rawUrl);
-            String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
-            boolean googleVideo = host.equals("googlevideo.com") || host.endsWith(".googlevideo.com");
-            if (!"https".equalsIgnoreCase(url.getProtocol())
-                    || (!googleVideo && !invidious.isTrustedStreamUrl(rawUrl))) {
-                Log.w(TAG, "Rejected untrusted video URL: " + rawUrl);
-                return text(Response.Status.INTERNAL_ERROR, "untrusted video host");
-            }
-
-            connection = (HttpURLConnection) url.openConnection();
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(60000);
-            connection.setRequestProperty("User-Agent",
-                "com.google.android.youtube/5.0.21 (Linux; U; Android 4.4.2; en_US)");
-            connection.setInstanceFollowRedirects(true);
+            java.net.URL currentUrl = new java.net.URL(rawUrl);
+            String range = null;
             if (session != null && session.getHeaders() != null) {
-                String range = session.getHeaders().get("range");
-                if (range != null) connection.setRequestProperty("Range", range);
+                range = session.getHeaders().get("range");
             }
 
-            int code = connection.getResponseCode();
-            Response.Status status;
-            if (code == HttpURLConnection.HTTP_PARTIAL) status = Response.Status.PARTIAL_CONTENT;
-            else if (code == HttpURLConnection.HTTP_OK) status = Response.Status.OK;
-            else if (code == 416) {
-                Response response = text(Response.Status.RANGE_NOT_SATISFIABLE, "Range Not Satisfiable");
+            for (int redirects = 0; redirects <= 5; redirects++) {
+                if (!isTrustedVideoUrl(currentUrl)) {
+                    Log.w(TAG, "Rejected untrusted video URL/redirect: " + currentUrl);
+                    return text(Response.Status.INTERNAL_ERROR, "untrusted video host");
+                }
+
+                connection = (HttpURLConnection) currentUrl.openConnection();
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(60000);
+                connection.setRequestProperty("User-Agent",
+                    "com.google.android.youtube/5.0.21 (Linux; U; Android 4.4.2; en_US)");
+                connection.setInstanceFollowRedirects(false);
+                if (range != null) connection.setRequestProperty("Range", range);
+
+                int code = connection.getResponseCode();
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String location = connection.getHeaderField("Location");
+                    if (location == null || location.trim().length() == 0 || redirects == 5) {
+                        return text(Response.Status.INTERNAL_ERROR, "video redirect unavailable");
+                    }
+                    java.net.URL redirectUrl = new java.net.URL(currentUrl, location);
+                    connection.disconnect();
+                    connection = null;
+                    currentUrl = redirectUrl;
+                    continue;
+                }
+
+                Response.Status status;
+                if (code == HttpURLConnection.HTTP_PARTIAL) status = Response.Status.PARTIAL_CONTENT;
+                else if (code == HttpURLConnection.HTTP_OK) status = Response.Status.OK;
+                else if (code == 416) {
+                    Response response = text(Response.Status.RANGE_NOT_SATISFIABLE, "Range Not Satisfiable");
+                    String contentRange = connection.getHeaderField("Content-Range");
+                    if (contentRange != null) response.addHeader("Content-Range", contentRange);
+                    response.addHeader("Accept-Ranges", "bytes");
+                    return response;
+                } else {
+                    Log.w(TAG, "Video upstream returned HTTP " + code);
+                    return text(Response.Status.INTERNAL_ERROR, "video upstream HTTP " + code);
+                }
+
+                String contentType = connection.getContentType();
+                if (contentType == null) contentType = "video/mp4";
+                int length = connection.getContentLength();
+                java.io.InputStream input = disconnectingStream(connection, connection.getInputStream());
+                Response response = length >= 0
+                    ? newFixedLengthResponse(status, contentType, input, length)
+                    : newChunkedResponse(status, contentType, input);
                 String contentRange = connection.getHeaderField("Content-Range");
                 if (contentRange != null) response.addHeader("Content-Range", contentRange);
-                response.addHeader("Accept-Ranges", "bytes");
+                String acceptRanges = connection.getHeaderField("Accept-Ranges");
+                response.addHeader("Accept-Ranges", acceptRanges != null ? acceptRanges : "bytes");
+                handedOff = true;
                 return response;
-            } else {
-                Log.w(TAG, "Video upstream returned HTTP " + code);
-                return text(Response.Status.INTERNAL_ERROR, "video upstream HTTP " + code);
             }
-
-            String contentType = connection.getContentType();
-            if (contentType == null) contentType = "video/mp4";
-            int length = connection.getContentLength();
-            java.io.InputStream input = disconnectingStream(connection, connection.getInputStream());
-            Response response = length >= 0
-                ? newFixedLengthResponse(status, contentType, input, length)
-                : newChunkedResponse(status, contentType, input);
-            String contentRange = connection.getHeaderField("Content-Range");
-            if (contentRange != null) response.addHeader("Content-Range", contentRange);
-            String acceptRanges = connection.getHeaderField("Accept-Ranges");
-            response.addHeader("Accept-Ranges", acceptRanges != null ? acceptRanges : "bytes");
-            handedOff = true;
-            return response;
+            return text(Response.Status.INTERNAL_ERROR, "too many video redirects");
         } catch (Exception e) {
             Log.e(TAG, "proxyVideo error: " + e.getMessage(), e);
             return text(Response.Status.INTERNAL_ERROR, "video stream unavailable");
