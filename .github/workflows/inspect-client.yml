@@ -26,14 +26,13 @@ jobs:
       - name: Install APK inspection tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y apktool unzip
-          sdkmanager "platforms;android-30" "build-tools;30.0.3"
+          sudo apt-get install -y apktool unzip aapt
 
       - name: Decode and inspect client APK
         run: |
           mkdir -p inspection
           APK="release/youtube-5.0.21-ytlegacy-v1.3-FINAL.apk"
-          aapt="$ANDROID_HOME/build-tools/30.0.3/aapt"
+          aapt="$(command -v aapt)"
           "$aapt" dump badging "$APK" > inspection/badging.txt
           "$aapt" dump xmltree "$APK" AndroidManifest.xml > inspection/manifest-tree.txt
           unzip -l "$APK" > inspection/zip-list.txt
