@@ -30,6 +30,15 @@
 - Piped `/streams/{id}` добавлен в playback; принимаются только цельные H.264 MP4 с `videoOnly=false` и media URL на origin из `proxyUrl`.
 - Проверки `Range`, `206 Partial Content` и `416 Range Not Satisfiable` сохранены для всех playback-провайдеров.
 
+### Единый APK YouTube 5.0.21 + ytlegacy-proxy (v1.16)
+
+- Патченный YouTube 5.0.21 и локальный сервер объединяются в один APK с исходным package `org.ytlegacy.daviskas`; отдельное приложение-прокси не требуется.
+- Прокси запускается автоматически при старте `Application`, до сетевых запросов клиента; сервер слушает только `127.0.0.1:8080`.
+- В штатном экране Settings добавлена отдельная категория **ytlegacy** → **ytlegacy settings**. Системные настройки YouTube остаются на месте.
+- Сборка сливает классы прокси и исходного клиента в один `classes.dex`, чтобы сохранить совместимость с Android API 8.
+- CI повторно декодирует итоговый APK и проверяет package, исходный launcher, прокси-службу, пункт настроек и ранний запуск сервера.
+
+**Установка тестовой сборки:** из-за отсутствия закрытого ключа подписи исходного APK объединённая сборка подписана отдельным debug-ключом. Android не установит её поверх уже установленного APK с другой подписью — старую копию потребуется удалить перед установкой. Удаление приложения может удалить и его локальные данные.
 ### Next version — in development
 
 - Public search, trending, and recommendations use a dedicated `SourceManager` with an explicit fallback order.
@@ -45,6 +54,15 @@
 - Piped `/streams/{id}` is now a playback source; only complete H.264 MP4 entries with `videoOnly=false` and media URLs on the response's advertised `proxyUrl` origin are accepted.
 - `Range`, `206 Partial Content`, and `416 Range Not Satisfiable` are preserved across playback providers.
 
+### Unified YouTube 5.0.21 + ytlegacy-proxy APK (v1.16)
+
+- The patched YouTube 5.0.21 client and local proxy are packaged as one APK under the original package ID, `org.ytlegacy.daviskas`; no separate proxy app is needed.
+- The local server starts automatically from the application's early startup hook, before the YouTube client initializes its network clients. It listens only on `127.0.0.1:8080`.
+- The existing YouTube Settings screen gains its own **ytlegacy** → **ytlegacy settings** entry. The original YouTube settings remain intact.
+- Proxy classes and dependencies are merged into the client's single `classes.dex` to preserve Android API 8 compatibility.
+- CI decodes the rebuilt APK again and checks its package, original launcher, proxy service, dedicated settings entry, and service autostart.
+
+**Test-build installation:** the original APK's private signing key is not available, so the unified test build uses a separate debug key. Android will reject an update over an APK signed with a different key; uninstall the old copy before installing this one. Uninstalling can remove its local data.
 ### v1.13
 
 - В окне входа добавлена кнопка **Share setup instructions**: она отправляет на компьютер URL yt2009, device code и короткую последовательность действий одним сообщением.
