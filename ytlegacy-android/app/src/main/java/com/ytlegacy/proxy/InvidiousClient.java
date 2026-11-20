@@ -203,6 +203,13 @@ public final class InvidiousClient {
         return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
     }
 
+    /** Short, metadata-only request used by batched feed cards. */
+    public JsonObject videoForFeed(String videoId) {
+        JsonElement result = getJson("/api/v1/videos/" + encode(videoId) + "?region=PL",
+            2, 1000, 1500, 2500L);
+        return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
+    }
+
     public JsonArray trending() {
         JsonElement result = getJson("/api/v1/trending?type=default&region=PL");
         return result != null && result.isJsonArray() ? result.getAsJsonArray() : null;
@@ -255,9 +262,20 @@ public final class InvidiousClient {
         return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
     }
 
+    /** Short channel lookup for the legacy feed's metadata batch. */
+    public JsonObject channelForFeed(String channelId) {
+        JsonElement result = getJson("/api/v1/channels/" + encode(channelId),
+            2, 1000, 1500, 2500L);
+        return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
+    }
+
     private void awaitInitialProbe() {
+        awaitInitialProbe(6500L);
+    }
+
+    private void awaitInitialProbe(long maxWaitMs) {
         refreshInBackground();
-        long deadline = System.currentTimeMillis() + 6500L;
+        long deadline = System.currentTimeMillis() + Math.max(0L, maxWaitMs);
         synchronized (lock) {
             while (probing && lastProbeAt == 0L) {
                 long remaining = deadline - System.currentTimeMillis();
@@ -272,7 +290,13 @@ public final class InvidiousClient {
     }
 
     private JsonElement getJson(String path) {
-        awaitInitialProbe();
+        return getJson(path, MAX_REQUEST_ATTEMPTS, REQUEST_CONNECT_TIMEOUT_MS,
+            REQUEST_READ_TIMEOUT_MS, 6500L);
+    }
+
+    private JsonElement getJson(String path, int maxAttempts, int connectTimeoutMs,
+                                 int readTimeoutMs, long initialProbeWaitMs) {
+        awaitInitialProbe(initialProbeWaitMs);
         if (System.currentTimeMillis() - lastProbeAt >= PROBE_INTERVAL_MS)
             refreshInBackground();
 
@@ -283,11 +307,11 @@ public final class InvidiousClient {
                 // Never send a real request to an unprobed or unhealthy candidate.
                 if (!server.probed || !server.alive || server.deadUntil > System.currentTimeMillis()) continue;
             }
-            if (attempts >= MAX_REQUEST_ATTEMPTS) break;
+            if (attempts >= maxAttempts) break;
             attempts++;
             long start = System.nanoTime();
             JsonElement result = requestRaw(server.base, path,
-                REQUEST_CONNECT_TIMEOUT_MS, REQUEST_READ_TIMEOUT_MS);
+                connectTimeoutMs, readTimeoutMs);
             long latency = Math.max(1L, (System.nanoTime() - start) / 1000000L);
             int statusCode = lastHttpStatus.get() == null ? 0 : lastHttpStatus.get().intValue();
 
