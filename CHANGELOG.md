@@ -12,7 +12,7 @@ All notable changes recorded here are for the releases updated during the curren
 ### Security and compatibility notes
 - The user still completes the upstream Google sign-in steps on the yt2009 PC page. The upstream flow requires manually copying its `oauth2_4` value; this release does not intercept browser traffic or automatically extract Google tokens.
 - This is a UX automation layer around yt2009's existing gsign protocol, not a replacement authentication protocol.
-- The Android debug APK must pass GitHub Actions before this release is published. Physical-device sign-in remains unverified.
+- The automatic polling and lifecycle changes compiled successfully in GitHub Actions (run `44709884802`). A final v1.12 release build is run by the `release v1.12` commit. Physical-device sign-in remains unverified.
 
 ## [1.11] - 2026-11-20
 
