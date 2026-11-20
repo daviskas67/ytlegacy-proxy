@@ -3,8 +3,6 @@ package com.ytlegacy.proxy;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -573,13 +571,22 @@ public class MainActivity extends Activity {
     @SuppressWarnings("deprecation")
     private void copyText(String value) {
         if (Build.VERSION.SDK_INT >= 11) {
-            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("ytlegacy", value));
-        } else {
-            android.text.ClipboardManager clipboard =
-                (android.text.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (clipboard != null) clipboard.setText(value);
+            try {
+                Object clipboard = getSystemService(Context.CLIPBOARD_SERVICE);
+                Class<?> clipDataClass = Class.forName("android.content.ClipData");
+                Object clip = clipDataClass.getMethod(
+                    "newPlainText", CharSequence.class, CharSequence.class
+                ).invoke(null, "ytlegacy", value);
+                clipboard.getClass().getMethod("setPrimaryClip", clipDataClass)
+                    .invoke(clipboard, clip);
+                return;
+            } catch (Throwable ignored) {
+                // Fall through to the API 8 clipboard service.
+            }
         }
+        android.text.ClipboardManager clipboard =
+            (android.text.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard != null) clipboard.setText(value);
     }
 
     private void addButton(LinearLayout parent, Button button, float density) {
