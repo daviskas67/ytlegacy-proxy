@@ -1,6 +1,7 @@
 package com.ytlegacy.proxy;
 
 import android.util.Log;
+import android.content.Context;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import fi.iki.elonen.NanoHTTPD;
@@ -20,10 +21,11 @@ public class ProxyServer extends NanoHTTPD {
     private static final String DEVICE_KEY = "XqWdDlb37csu+WU5qX2zR3y3gamS4ITVnK+r0looTM0=";
     private static final String LOCAL_BASE = "http://127.0.0.1:8080";
 
-    private static final String VERSION = "1.10";
+    private static final String VERSION = "1.11";
     private final InvidiousClient invidious = new InvidiousClient();
     private final PipedClient piped = new PipedClient();
     private final Yt2009Client yt2009 = new Yt2009Client();
+    private final Yt2009AccountManager yt2009Account;
     private final InnerTubeClient innerTube = new InnerTubeClient();
     private final AtomicLong requestCount = new AtomicLong();
     private final AtomicLong channelCacheHits = new AtomicLong();
@@ -39,7 +41,12 @@ public class ProxyServer extends NanoHTTPD {
     private static final long LIKE_TTL = 600000L;
 
     public ProxyServer() throws IOException {
+        this(null);
+    }
+
+    public ProxyServer(Context context) throws IOException {
         super("127.0.0.1", 8080);
+        yt2009Account = new Yt2009AccountManager(context);
         // Загружаем список инстансов в фоне, чтобы не блокировать запуск
         new Thread(new Runnable() {
             public void run() {
@@ -66,6 +73,28 @@ public class ProxyServer extends NanoHTTPD {
             if ("/health".equals(uri) || "/api/status".equals(uri)) return healthResponse();
             if ("/api/invidious".equals(uri)) return json(invidious.getStatus().toString());
             if ("/api/piped".equals(uri)) return json(piped.getStatus().toString());
+            if ("/api/yt2009/login/start".equals(uri)) {
+                if (!"POST".equalsIgnoreCase(session.getMethod().name()))
+                    return text(Response.Status.METHOD_NOT_ALLOWED, "Use POST");
+                try {
+                    return json(yt2009Account.startLogin().toString());
+                } catch (Exception e) {
+                    Log.w(TAG, "yt2009 login initialization failed: " + e.getMessage());
+                    JsonObject error = new JsonObject();
+                    error.addProperty("ok", false);
+                    error.addProperty("error", e.getMessage() == null ? "yt2009 connection failed" : e.getMessage());
+                    return json(error.toString());
+                }
+            }
+            if ("/api/yt2009/login/status".equals(uri))
+                return json(yt2009Account.checkStatus().toString());
+            if ("/api/yt2009/login/picker".equals(uri)) {
+                if (!yt2009Account.isAuthorized())
+                    return text(Response.Status.UNAUTHORIZED, "Complete yt2009 sign-in first");
+                Response picker = newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "");
+                picker.addHeader("Location", yt2009Account.getAccountPickerUrl());
+                return picker;
+            }
             if ("/api/cache".equals(uri)) return cacheResponse();
             if ("/api/cache/clear".equals(uri)) {
                 if (!"POST".equalsIgnoreCase(session.getMethod().name()))
@@ -352,6 +381,19 @@ public class ProxyServer extends NanoHTTPD {
                 // A logged-out legacy client has no personal subscriptions.
                 // Fill its subscriptions screen with a useful public discovery feed.
                 if ("subscriptions".equals(kind) || "activity".equals(kind)) {
+                    // First try the personalized yt2009 home feed. The account
+                    // device id is sent only to the explicitly selected instance,
+                    // never to the Invidious/Piped community pools.
+                    if (yt2009Account.isAuthorized()) {
+                        String personal = yt2009.fetchAccountFeed(
+                            "/feeds/api/users/default/recommendations",
+                            yt2009Account.getDeviceId());
+                        if (personal != null && personal.contains("<entry")) {
+                            Log.i(TAG, "Serving personalized yt2009 recommendations");
+                            return xml(personal);
+                        }
+                    }
+
                     JsonArray recommendations = invidious.trending();
                     if (recommendations == null || recommendations.size() == 0)
                         recommendations = piped.trending();
@@ -519,6 +561,22 @@ public class ProxyServer extends NanoHTTPD {
                     return xml(body);
                 }
                 return xml(emptyFeed("channel"));
+            }
+
+            // Keep old GData sign-in links local while opening the same trusted yt2009 instance.
+            if ("/gsign".equals(uri)) {
+                String device = yt2009Account.getDeviceId();
+                if (device == null) return text(Response.Status.UNAUTHORIZED, "Start Google login in ytlegacy-proxy first");
+                Response redirect = newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "");
+                redirect.addHeader("Location", Yt2009AccountManager.INSTANCE + "/gsign?device=" + device);
+                return redirect;
+            }
+            if ("/mobile/mobilehelper/account_picker.html".equals(uri)) {
+                String device = yt2009Account.getDeviceId();
+                if (device == null) return text(Response.Status.UNAUTHORIZED, "No yt2009 login session");
+                Response redirect = newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "");
+                redirect.addHeader("Location", Yt2009AccountManager.accountPickerUrl(device));
+                return redirect;
             }
 
             // === /avatar_wait — neutral placeholder while a channel avatar loads ===
@@ -1175,6 +1233,13 @@ public class ProxyServer extends NanoHTTPD {
         status.add("invidious", invidious.getStatus());
         status.add("piped", piped.getStatus());
 
+        JsonObject account = new JsonObject();
+        account.addProperty("instance", Yt2009AccountManager.INSTANCE);
+        account.addProperty("deviceConfigured", yt2009Account.getDeviceId() != null);
+        account.addProperty("authorized", yt2009Account.isAuthorized());
+        account.addProperty("accountPicker", yt2009Account.getAccountPickerUrl());
+        status.add("yt2009Account", account);
+
         JsonObject fallback = new JsonObject();
         fallback.addProperty("configuredInstances", yt2009.getConfiguredInstanceCount());
         fallback.addProperty("healthyInstances", yt2009.getHealthyInstanceCount());
@@ -1191,6 +1256,7 @@ public class ProxyServer extends NanoHTTPD {
         JsonArray features = new JsonArray();
         features.add(new com.google.gson.JsonPrimitive("invidious-primary-fastest-first"));
         features.add(new com.google.gson.JsonPrimitive("piped-secondary-read-only"));
+        features.add(new com.google.gson.JsonPrimitive("yt2009-gsign-personalized-feed"));
         features.add(new com.google.gson.JsonPrimitive("yt2009-last-resort"));
         features.add(new com.google.gson.JsonPrimitive("search-suggestions"));
         features.add(new com.google.gson.JsonPrimitive("playlist-feeds"));
