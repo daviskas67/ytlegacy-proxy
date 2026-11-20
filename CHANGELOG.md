@@ -2,6 +2,26 @@
 
 All notable changes recorded here are for the releases updated during the current maintenance work. Dates use YYYY-MM-DD.
 
+## [1.10] - 2026-11-20
+
+### Added
+- Added 44 user-supplied HTTPS-only Invidious candidates in addition to the four instances in the current Invidious documentation list. Each candidate must return a valid `/api/v1/stats` response identifying Invidious before it is selected.
+- Added bounded Invidious probing with a six-worker executor to avoid creating one thread per candidate on older Android devices.
+- Added `PipedClient` with 15 API endpoints from the current Piped public-instances documentation and 14 additional user-supplied candidates. The client probes `/trending?region=PL` and normalizes Piped search/trending items into the existing feed model.
+- Added Piped fallback for legacy search feeds, standard trending feeds, logged-out discovery feeds, and the protobuf activities endpoint.
+- Added `/api/piped` diagnostics and Piped status to `/health`.
+
+### Changed
+- Set Android `versionName` to `1.10` and `versionCode` to `7`.
+- User-supplied HTTP candidates are attempted over HTTPS only; no plaintext HTTP fallback is made.
+- Piped requests are read-only and do not send Authorization headers, cookies, or account credentials.
+
+### Compatibility and security notes
+- Piped is used only for public search and trending/discovery feeds in this release. Piped proxy URLs are not used for playback.
+- The extra community instances are candidates, not endorsed or security-reviewed providers. Their health is checked at runtime; HTTPS support alone does not make an instance trusted.
+- Google account sign-in and personalized recommendations are not implemented. The upstream yt2009 `gsign` flow is not standard OAuth and requires handing sensitive authorization data to a third-party server. This release does not forward Google tokens to public instances. A safe authenticated integration requires a separately configured Google OAuth client and YouTube API access.
+- No physical-device test of the new Piped feed path is claimed yet.
+
 ## [1.9] - 2026-11-20
 
 ### Added
