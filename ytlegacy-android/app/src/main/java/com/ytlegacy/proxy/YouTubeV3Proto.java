@@ -61,26 +61,33 @@ public final class YouTubeV3Proto {
             String id = str(data, "videoId");
             if (!validVideoId(id)) continue;
             Proto snippet = new Proto();
-            String channelId = str(data, "authorId");
-            if (!channelId.isEmpty()) snippet.string(2, channelId);
-            snippet.string(3, str(data, "title"));
-            snippet.string(4, str(data, "description"));
-            snippet.string(6, str(data, "author"));
+            // These field numbers match the generated VideoSnippet parser in
+            // the bundled YouTube 5.0.21 client: publishedAt=1, title=4,
+            // description=5, channelTitle=7.
+            snippet.string(1, str(data, "published"));
+            snippet.string(4, str(data, "title"));
+            snippet.string(5, str(data, "description"));
+            snippet.string(7, str(data, "author"));
 
             Proto content = new Proto();
             int duration = integer(data, "lengthSeconds");
             if (duration > 0) content.string(1, "PT" + duration + "S");
 
+            // Video resource field 4 is status (bp); field 5 is statistics
+            // (bo). The feed adapter unconditionally reads statistics.viewCount
+            // through Video.e().a(), so omitting field 5 leaves a null object.
+            Proto status = new Proto();
             Proto stats = new Proto();
             long views = number(data, "viewCount");
             long likes = number(data, "likeCount");
-            if (views > 0) stats.string(1, String.valueOf(views));
-            if (likes > 0) stats.string(2, String.valueOf(likes));
+            if (views > 0) stats.varint(1, views);
+            if (likes > 0) stats.varint(2, likes);
 
             Proto item = new Proto();
             item.message(2, snippet.bytes());
             item.message(3, content.bytes());
-            item.message(4, stats.bytes());
+            item.message(4, status.bytes());
+            item.message(5, stats.bytes());
             item.string(101, id);
             item.string(200, "youtube#video");
             item.string(201, "");

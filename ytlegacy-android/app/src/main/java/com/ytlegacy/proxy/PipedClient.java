@@ -162,10 +162,24 @@ public final class PipedClient {
         return normalizeVideos(result);
     }
 
+    /** Short trending lookup for the legacy home-feed bootstrap. */
+    public JsonArray trendingForFeed() {
+        JsonElement result = getJson("/trending?region=PL", 2, 1000, 1500, 2500L);
+        return normalizeVideos(result);
+    }
+
     /** Fetches unauthenticated stream metadata through the healthy Piped instance pool. */
     public JsonObject streams(String videoId) {
         if (!validVideoId(videoId)) return null;
         JsonElement result = getJson("/streams/" + encode(videoId));
+        return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
+    }
+
+    /** Short, metadata-only request used by batched feed cards. */
+    public JsonObject streamsForFeed(String videoId) {
+        if (!validVideoId(videoId)) return null;
+        JsonElement result = getJson("/streams/" + encode(videoId),
+            2, 1000, 1500, 2500L);
         return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
     }
 
@@ -222,7 +236,13 @@ public final class PipedClient {
 
     // Package-private seam for local unit tests; production callers use search/trending.
     private JsonElement getJson(String path) {
-        awaitInitialProbe();
+        return getJson(path, MAX_REQUEST_ATTEMPTS, REQUEST_CONNECT_TIMEOUT_MS,
+            REQUEST_READ_TIMEOUT_MS, 6500L);
+    }
+
+    private JsonElement getJson(String path, int maxAttempts, int connectTimeoutMs,
+                                 int readTimeoutMs, long initialProbeWaitMs) {
+        awaitInitialProbe(initialProbeWaitMs);
         if (System.currentTimeMillis() - lastProbeAt >= PROBE_INTERVAL_MS)
             refreshInBackground();
 
@@ -232,11 +252,11 @@ public final class PipedClient {
             synchronized (lock) {
                 if (!server.probed || !server.alive || server.deadUntil > System.currentTimeMillis()) continue;
             }
-            if (attempts >= MAX_REQUEST_ATTEMPTS) break;
+            if (attempts >= maxAttempts) break;
             attempts++;
             long start = System.nanoTime();
             JsonElement result = requestRaw(server.base, path,
-                REQUEST_CONNECT_TIMEOUT_MS, REQUEST_READ_TIMEOUT_MS);
+                connectTimeoutMs, readTimeoutMs);
             long latency = Math.max(1L, (System.nanoTime() - start) / 1000000L);
             int status = lastHttpStatus.get() == null ? 0 : lastHttpStatus.get().intValue();
 
@@ -245,7 +265,10 @@ public final class PipedClient {
                 return result;
             }
             if (status == 0 || status == 429 || status >= 500 || status == 200) {
-                markFailed(server, "HTTP " + status + " for " + path);
+                String reason = status == 200
+                    ? "HTTP 200 body read/JSON parse failed for " + path
+                    : "HTTP " + status + " for " + path;
+                markFailed(server, reason);
             } else {
                 markResponsive(server, latency);
                 Log.w(TAG, server.base + " returned HTTP " + status + " for " + path);
@@ -257,8 +280,12 @@ public final class PipedClient {
     }
 
     private void awaitInitialProbe() {
+        awaitInitialProbe(6500L);
+    }
+
+    private void awaitInitialProbe(long maxWaitMs) {
         refreshInBackground();
-        long deadline = System.currentTimeMillis() + 6500L;
+        long deadline = System.currentTimeMillis() + Math.max(0L, maxWaitMs);
         synchronized (lock) {
             while (probing && lastProbeAt == 0L) {
                 long remaining = deadline - System.currentTimeMillis();

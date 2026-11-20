@@ -150,6 +150,21 @@ public class VideoData {
         return v;
     }
 
+    /**
+     * Minimal feed record used when an upstream metadata lookup misses the
+     * shared batch deadline. Keeping the original video ID lets the legacy
+     * client join every activity to a video object instead of dereferencing null.
+     */
+    public static VideoData feedPlaceholder(String videoId) {
+        if (videoId == null || !videoId.matches("[A-Za-z0-9_-]{11}")) return null;
+        VideoData video = new VideoData();
+        video.id = videoId;
+        video.title = videoId;
+        video.author = "YouTube";
+        video.channelId = "";
+        return video;
+    }
+
     /** Converts this model to the subset of a YouTube Data API v3 video used by the legacy client. */
     public JsonObject toYouTubeV3Json() {
         JsonObject result = new JsonObject();
@@ -157,6 +172,7 @@ public class VideoData {
         result.addProperty("title", title);
         result.addProperty("description", description);
         result.addProperty("author", author);
+        result.addProperty("published", published);
         String validChannelId = channelId != null && channelId.matches("UC[A-Za-z0-9_-]{22}")
             ? channelId : "";
         result.addProperty("authorId", validChannelId);
