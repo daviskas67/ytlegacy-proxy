@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.15] - Unreleased
+
+### Changed
+- Добавлен единый порядок выбора playback-провайдера: Invidious → Piped → yt2009 community-instance pool → InnerTube; статистика доступна в `/api/sources`.
+- Piped `/streams/{id}` добавлен как источник потоков через здоровые API-инстансы. Принимаются только цельные progressive H.264 MP4 (`videoOnly=false`) с HTTPS-origin, совпадающим с `proxyUrl` из ответа.
+- yt2009 `fmt_stream_map` больше не переписывает внутренние ссылки на один фиксированный хост. Используется инстанс, вернувший `get_video_info`, затем ограниченный пул остальных доступных HTTPS-инстансов.
+- Поддержаны Range, 206 и 416 на всех playback-провайдерах; добавлены тесты на перемотку и форматные фильтры.
+- Версия Android package, health endpoint и service notification обновлены до 1.15.
+
+### Verification
+- Unit tests and APK build are being checked by GitHub Actions for this pull request.
+- Actual audio playback, seeking, and quality switching still require testing on a physical legacy Android device.
+
 ## [1.14] - 2026-11-20
 
 ### Changed
