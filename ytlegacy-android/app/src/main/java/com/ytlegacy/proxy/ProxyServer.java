@@ -685,15 +685,18 @@ public class ProxyServer extends NanoHTTPD {
                 Response invidiousStream = tryInvidiousStream(vid, session, requestedQuality);
                 if (invidiousStream != null) return invidiousStream;
 
-                if (invidious.getHealthyCount() == 0) {
-                    java.net.HttpURLConnection yc = yt2009.tryStream(vid, session, requestedQuality);
-                    if (yc != null) {
-                        Log.i(TAG, "STREAM via yt2009 fallback OK");
-                        return buildStreamResponse(yc);
-                    }
+                Response pipedStream = tryPipedStream(vid, session, requestedQuality);
+                if (pipedStream != null) return pipedStream;
+
+                java.net.HttpURLConnection yt2009Stream =
+                    yt2009.tryStream(vid, session, requestedQuality);
+                if (yt2009Stream != null) {
+                    Log.i(TAG, "STREAM via yt2009 instance pool fallback OK");
+                    return buildStreamResponse(yt2009Stream);
                 }
 
-                Log.w(TAG, "Invidious stream unavailable for " + vid + ", trying InnerTube");
+                Log.w(TAG, "Invidious/Piped/yt2009 stream unavailable for " + vid
+                    + ", trying InnerTube");
                 Response modernStream = tryInnerTubeStream(vid, session, requestedQuality);
                 if (modernStream != null) return modernStream;
 
@@ -765,14 +768,17 @@ public class ProxyServer extends NanoHTTPD {
                     String requestedQuality = getRequestedQuality(session);
                     Response invidiousStream = tryInvidiousStream(vid, session, requestedQuality);
                     if (invidiousStream != null) return invidiousStream;
-                    if (invidious.getHealthyCount() == 0) {
-                        java.net.HttpURLConnection yc = yt2009.tryStream(vid, session);
-                        if (yc != null) {
-                            Log.i(TAG, "STREAM legacy via yt2009 fallback OK");
-                            return buildStreamResponse(yc);
-                        }
+
+                    Response pipedStream = tryPipedStream(vid, session, requestedQuality);
+                    if (pipedStream != null) return pipedStream;
+
+                    java.net.HttpURLConnection yt2009Stream =
+                        yt2009.tryStream(vid, session, requestedQuality);
+                    if (yt2009Stream != null) {
+                        Log.i(TAG, "STREAM legacy via yt2009 instance pool fallback OK");
+                        return buildStreamResponse(yt2009Stream);
                     }
-                    Log.w(TAG, "Legacy stream unavailable from Invidious/yt2009; trying InnerTube");
+                    Log.w(TAG, "Legacy stream unavailable from Invidious/Piped/yt2009; trying InnerTube");
                     Response modernStream = tryInnerTubeStream(vid, session, requestedQuality);
                     if (modernStream != null) return modernStream;
                 } else {
@@ -938,6 +944,30 @@ public class ProxyServer extends NanoHTTPD {
             Log.w(TAG, "Invidious stream returned " + status + " for " + videoId);
         } catch (Exception e) {
             Log.w(TAG, "Invidious stream failed for " + videoId + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    private Response tryPipedStream(String videoId, IHTTPSession session, String quality) {
+        try {
+            JsonObject streams = piped.streams(videoId);
+            PipedStreamSelector.Selection selected = PipedStreamSelector.select(streams, quality);
+            if (selected == null) return null;
+            if (!PipedStreamSelector.isTrustedStreamUrl(selected.proxyUrl, selected.url)) {
+                Log.w(TAG, "Rejected Piped stream URL outside its advertised proxy origin");
+                return null;
+            }
+
+            Response response = proxyVideo(selected.url, session, selected.proxyUrl);
+            int status = response.getStatus().getRequestStatus();
+            if (status == 200 || status == 206) {
+                Log.i(TAG, "Piped stream OK for " + videoId + " height="
+                    + selected.height + " codec=" + selected.codec);
+                return response;
+            }
+            Log.w(TAG, "Piped stream returned HTTP " + status + " for " + videoId);
+        } catch (Exception e) {
+            Log.w(TAG, "Piped stream fallback failed for " + videoId + ": " + e.getMessage());
         }
         return null;
     }
@@ -1234,14 +1264,23 @@ public class ProxyServer extends NanoHTTPD {
     }
 
     private boolean isTrustedVideoUrl(java.net.URL url) {
+        return isTrustedVideoUrl(url, null);
+    }
+
+    private boolean isTrustedVideoUrl(java.net.URL url, String pipedProxyUrl) {
         if (url == null || !"https".equalsIgnoreCase(url.getProtocol())) return false;
         if (url.getUserInfo() != null || (url.getPort() != -1 && url.getPort() != 443)) return false;
         String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
         boolean googleVideo = host.equals("googlevideo.com") || host.endsWith(".googlevideo.com");
-        return googleVideo || invidious.isTrustedStreamUrl(url.toString());
+        return googleVideo || invidious.isTrustedStreamUrl(url.toString())
+            || PipedStreamSelector.isTrustedStreamUrl(pipedProxyUrl, url.toString());
     }
 
     private Response proxyVideo(String rawUrl, IHTTPSession session) {
+        return proxyVideo(rawUrl, session, null);
+    }
+
+    private Response proxyVideo(String rawUrl, IHTTPSession session, String pipedProxyUrl) {
         HttpURLConnection connection = null;
         boolean handedOff = false;
         try {
@@ -1252,7 +1291,7 @@ public class ProxyServer extends NanoHTTPD {
             }
 
             for (int redirects = 0; redirects <= 5; redirects++) {
-                if (!isTrustedVideoUrl(currentUrl)) {
+                if (!isTrustedVideoUrl(currentUrl, pipedProxyUrl)) {
                     Log.w(TAG, "Rejected untrusted video URL/redirect: " + currentUrl);
                     return text(Response.Status.INTERNAL_ERROR, "untrusted video host");
                 }
