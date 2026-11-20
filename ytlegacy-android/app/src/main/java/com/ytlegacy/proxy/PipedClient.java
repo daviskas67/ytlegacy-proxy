@@ -175,8 +175,9 @@ public final class PipedClient {
                 source = object.getAsJsonArray("items");
         }
 
+        if (source == null) return null;
+
         JsonArray normalized = new JsonArray();
-        if (source == null) return normalized;
 
         for (int i = 0; i < source.size() && normalized.size() < 50; i++) {
             try {
@@ -206,6 +207,12 @@ public final class PipedClient {
             }
         }
         return normalized;
+    }
+
+
+    // Package-private seam for local unit tests; production callers use search/trending.
+    JsonArray normalizeVideosForTest(JsonElement response) {
+        return normalizeVideos(response);
     }
 
     private JsonElement getJson(String path) {
