@@ -65,7 +65,7 @@ public final class StreamFormatSelector {
         // well-known legacy MP4 formats. Never apply this to adaptiveFormats.
         if (!allowKnownProgressiveItag) return false;
         int itag = getInt(format, "itag", -1);
-        return itag == 18 || itag == 22;
+        return itag == 18 || itag == 59 || itag == 22;
     }
 
     private static JsonObject select(JsonArray formats, String quality,
@@ -126,6 +126,7 @@ public final class StreamFormatSelector {
         }
         int itag = getInt(format, "itag", -1);
         if (itag == 18) return 360;
+        if (itag == 59) return 480;
         if (itag == 22) return 720;
         return 0;
     }
