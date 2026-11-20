@@ -11,9 +11,23 @@
 
 ## Русский
 
-> 🎉 **ytlegacy-proxy v1.13 уже вышел!**  
-> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13). В этом выпуске мастер входа умеет делиться инструкцией и кодом устройства одной кнопкой, а статус выбранного канала обновляется автоматически.
+> **ytlegacy-proxy v1.14 уже вышел.**  
+> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.14). Вход через yt2009 необязателен; публичные функции работают без авторизации.
 
+
+### Следующая версия — в разработке
+
+- Выбор публичных источников для поиска, трендов и рекомендаций проходит через отдельный `SourceManager` с фиксированным порядком fallback.
+- Пустой ответ API отделён от ошибки сети/сервера. Например, отказ всех Piped-инстансов больше не маскируется под пустую выдачу.
+- Добавлена диагностика `GET /api/sources`: число попыток, успешных/пустых ответов и ошибок, последняя операция и задержка по каждому провайдеру.
+- GitHub Actions запускает JVM unit-тесты перед сборкой APK.
+
+### Next version — in development
+
+- Public search, trending, and recommendations use a dedicated `SourceManager` with an explicit fallback order.
+- A valid empty API response is tracked separately from a network/server failure. A Piped outage is no longer silently converted into an empty result list.
+- Added `GET /api/sources` diagnostics for provider attempts, successful/empty responses, failures, last operation, and latency.
+- GitHub Actions runs JVM unit tests before assembling the APK.
 
 ### v1.13
 
@@ -112,6 +126,7 @@ Piped сейчас служит только резервом для публи�
 | `/api/status` | Состояние сервиса |
 | `/api/invidious` | Состояние каждого Invidious-экземпляра, задержка, ошибки и выбранный сервер |
 | `/api/piped` | Состояние каждого Piped API-инстанса и задержки |
+| `/api/sources` | Статистика выбора источников: успехи, пустые ответы, ошибки и задержки |
 | `/api/yt2009/login/status` | Состояние привязки yt2009 и список каналов |
 | `/api/cache` | Статистика локального кэша |
 | `/api/video/{id}` | Диагностика метаданных конкретного видео |
@@ -140,7 +155,7 @@ Android-проект находится в каталоге `ytlegacy-android/`.
 
 - JDK 17
 - Android SDK Platform 30
-- Android Build Tools 29.0.3
+- Android Build Tools 30.0.3
 - Android Gradle Plugin 7.4.2
 - Gradle 7.5.1
 
@@ -159,7 +174,7 @@ app/build/outputs/apk/debug/app-debug.apk
 
 GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.13-debug` (доступен 14 дней) и публикует v1.13 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
 
-Сборка v1.13 прошла успешно: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
+Сборка v1.14 прошла успешно: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
 
 Дополнительный скрипт `build-manual.sh` рассчитан на окружения, где уже доступны Android SDK tools, D8, Gson 2.2.4 и NanoHTTPD 2.3.1 JAR-файлы.
 
@@ -313,6 +328,7 @@ After the service starts, open the relevant endpoint on the device:
 | `/api/status` | Service status |
 | `/api/invidious` | Per-instance health, latency, failures, and selected server |
 | `/api/piped` | Per-instance Piped API health and latency |
+| `/api/sources` | Source routing statistics: successes, empty responses, failures, and latency |
 | `/api/yt2009/login/status` | yt2009 account-link status and available channels |
 | `/api/cache` | Local cache statistics |
 | `/api/video/{id}` | Metadata diagnostics for a video |
@@ -356,9 +372,9 @@ The APK is generated at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.11-debug` artifact (available for 14 days) and publishes the v1.13 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
+GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.14-debug` artifact (available for 14 days) and publishes the v1.14 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
 
-The v1.13 build passed: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
+The v1.14 build passed: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
 
 The optional `build-manual.sh` script is intended for environments that already provide Android SDK tools, D8, Gson 2.2.4, and NanoHTTPD 2.3.1 JARs.
 
