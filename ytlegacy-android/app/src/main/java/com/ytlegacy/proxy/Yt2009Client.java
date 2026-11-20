@@ -14,10 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.List;
 import com.google.gson.reflect.TypeToken;
-import java.util.HashMap;
-import java.util.Map;
 import fi.iki.elonen.NanoHTTPD;
 
 public class Yt2009Client {
@@ -249,35 +246,49 @@ public class Yt2009Client {
     /** gvi + парсинг fmt_stream_map. */
     public Info getVideoInfo(String videoId) {
         Info info = new Info();
+        if (videoId == null || !videoId.matches("[A-Za-z0-9_-]{11}")) return info;
+
+        HttpURLConnection connection = null;
         try {
-            HttpURLConnection c = openWithFailover("/get_video_info?video_id=" + videoId, null);
-            if (c.getResponseCode() != 200) {
-                Log.w(TAG, "gvi HTTP " + c.getResponseCode());
+            connection = openWithFailover("/get_video_info?video_id="
+                + java.net.URLEncoder.encode(videoId, "UTF-8"), null);
+            if (connection == null) {
+                Log.w(TAG, "gvi unavailable: no healthy yt2009 instance");
                 return info;
             }
-            BufferedReader br = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line);
-            br.close();
+            int responseCode = connection.getResponseCode();
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                Log.w(TAG, "gvi HTTP " + responseCode);
+                return info;
+            }
 
-            for (String kv : sb.toString().split("&")) {
+            String body = readBody(connection);
+            if (body == null || body.length() == 0) return info;
+
+            for (String kv : body.split("&")) {
                 int eq = kv.indexOf('=');
                 if (eq <= 0) continue;
-                String k = kv.substring(0, eq);
-                String v = kv.substring(eq + 1);
+                String key = kv.substring(0, eq);
+                String value = kv.substring(eq + 1);
                 try {
-                    if ("status".equals(k)) info.status = URLDecoder.decode(v, "UTF-8");
-                    else if ("title".equals(k)) info.title = URLDecoder.decode(v, "UTF-8");
-                    else if ("author".equals(k)) info.author = URLDecoder.decode(v, "UTF-8");
-                    else if ("length_seconds".equals(k)) info.lengthSeconds = Integer.parseInt(v);
-                    else if ("fmt_stream_map".equals(k)) parseFmtMap(URLDecoder.decode(v, "UTF-8"), info);
-                } catch (Exception e) { }
+                    if ("status".equals(key)) info.status = URLDecoder.decode(value, "UTF-8");
+                    else if ("title".equals(key)) info.title = URLDecoder.decode(value, "UTF-8");
+                    else if ("author".equals(key)) info.author = URLDecoder.decode(value, "UTF-8");
+                    else if ("length_seconds".equals(key)) {
+                        info.lengthSeconds = Math.max(0, Integer.parseInt(value));
+                    } else if ("fmt_stream_map".equals(key)) {
+                        parseFmtMap(URLDecoder.decode(value, "UTF-8"), info);
+                    }
+                } catch (Exception malformedValue) {
+                    Log.w(TAG, "Ignoring malformed gvi field " + key);
+                }
             }
-            Log.i(TAG, "gvi " + videoId + ": status=" + info.status + " title='" + info.title
-                + "' itags=" + info.fmtUrls.keySet());
+            Log.i(TAG, "gvi " + videoId + ": status=" + info.status + " title='"
+                + info.title + "' itags=" + info.fmtUrls.keySet());
         } catch (Exception e) {
-            Log.e(TAG, "gvi error: " + e);
+            Log.e(TAG, "gvi error: " + e.getMessage());
+        } finally {
+            if (connection != null) connection.disconnect();
         }
         return info;
     }
@@ -302,59 +313,81 @@ public class Yt2009Client {
      * Порядок: exp_hd (MP4 itag 22/37) -> get_480 (FLV itag 35) -> get_video (MP4 itag 5).
      */
     public HttpURLConnection tryStream(String videoId, NanoHTTPD.IHTTPSession session) {
-        // негативный кэш: если видео недавно 404/429 — не долбить yt2009
+        if (videoId == null || !videoId.matches("[A-Za-z0-9_-]{11}")) return null;
+
+        long now = System.currentTimeMillis();
         Long failedAt = failedVideos.get(videoId);
-        if (failedAt != null && System.currentTimeMillis() - failedAt < NEG_CACHE_TTL) {
-            Log.i(TAG, "tryStream " + videoId + " skipped (negative cache)");
-            return null;
+        if (failedAt != null) {
+            if (now - failedAt.longValue() < NEG_CACHE_TTL) {
+                Log.i(TAG, "tryStream " + videoId + " skipped (negative cache)");
+                return null;
+            }
+            failedVideos.remove(videoId, failedAt);
         }
-        // 720p MP4 первым (кэшируется быстро), 240p MP4 как last resort.
-        // /get_480 (FLV, 14с) убран — старый Android не проигрывает FLV.
-                String[] paths = {
+
+        // Prefer progressive MP4; the old client cannot reliably play FLV.
+        String[] paths = {
             "/exp_hd?video_id=" + videoId,
-            "/get_video?video_id=" + videoId + "/mp4",  // Прямая ссылка на MP4 (как в браузере)
+            "/get_video?video_id=" + videoId + "/mp4",
             "/get_video?video_id=" + videoId
         };
-        for (String p : paths) {
+        for (String path : paths) {
+            HttpURLConnection connection = null;
             try {
-                HttpURLConnection c = openWithFailover(p, session);
-                c.setConnectTimeout(3000);
-                c.setReadTimeout(60000);
-                int code = c.getResponseCode();
-                Log.i(TAG, "tryStream " + p + " -> HTTP " + code);
-                // manual redirect follow (Location может вести на /assets/...mp4?ac=...)
-                int hops = 0;
-                while ((code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
-                        && hops < 5) {
-                    String loc = c.getHeaderField("Location");
-                    Log.i(TAG, "  redirect -> " + loc);
-                    if (loc == null) break;
-                    // strip cache-buster ?ac=... — иначе yt2009 перегенерирует файл каждый раз
-                    loc = loc.replaceAll("[?&]ac=[^&]*", "");
-                    c.disconnect();
-                    java.net.URL resolved = new java.net.URL(c.getURL(), loc);
-                    c = (HttpURLConnection) resolved.openConnection();
-                    c.setConnectTimeout(10000);
-                    c.setReadTimeout(120000);
-                    c.setRequestProperty("User-Agent", BROWSER_UA);
-                    String range = session.getHeaders().get("range");
-                    if (range != null) c.setRequestProperty("Range", range);
-                    code = c.getResponseCode();
-                    hops++;
-                    Log.i(TAG, "  hop " + hops + " -> HTTP " + code);
+                connection = openWithFailover(path, session);
+                if (connection == null) {
+                    Log.w(TAG, "tryStream " + path + " skipped: no healthy yt2009 instance");
+                    continue;
                 }
-                String ct = c.getContentType();
-                Log.i(TAG, "  final HTTP " + code + " ct=" + ct);
-                if ((code == 200 || code == 206) && ct != null
-                        && (ct.startsWith("video/") || ct.startsWith("application/octet-stream"))) {
-                    return c;
+
+                connection.setConnectTimeout(3000);
+                connection.setReadTimeout(60000);
+                int code = connection.getResponseCode();
+                Log.i(TAG, "tryStream " + path + " -> HTTP " + code);
+
+                int redirects = 0;
+                while ((code == 301 || code == 302 || code == 303
+                        || code == 307 || code == 308) && redirects < 5) {
+                    String location = connection.getHeaderField("Location");
+                    if (location == null || location.trim().length() == 0) break;
+
+                    // Resolve the redirect before disconnecting the previous response.
+                    URL target = new URL(connection.getURL(), location);
+                    connection.disconnect();
+                    connection = (HttpURLConnection) target.openConnection();
+                    connection.setConnectTimeout(10000);
+                    connection.setReadTimeout(120000);
+                    connection.setInstanceFollowRedirects(false);
+                    connection.setRequestProperty("User-Agent", BROWSER_UA);
+                    if (session != null && session.getHeaders() != null) {
+                        String range = session.getHeaders().get("range");
+                        if (range != null) connection.setRequestProperty("Range", range);
+                    }
+                    code = connection.getResponseCode();
+                    redirects++;
+                    Log.i(TAG, "  redirect " + redirects + " -> HTTP " + code);
                 }
-                c.disconnect();
+
+                String contentType = connection.getContentType();
+                Log.i(TAG, "  final HTTP " + code + " ct=" + contentType);
+                if ((code == HttpURLConnection.HTTP_OK || code == HttpURLConnection.HTTP_PARTIAL)
+                        && contentType != null
+                        && (contentType.startsWith("video/")
+                            || contentType.startsWith("application/octet-stream"))) {
+                    HttpURLConnection ready = connection;
+                    connection = null; // Ownership transfers to ProxyServer.
+                    failedVideos.remove(videoId);
+                    return ready;
+                }
             } catch (Exception e) {
-                Log.w(TAG, "tryStream " + p + " error: " + e);
+                Log.w(TAG, "tryStream " + path + " error: " + e.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
             }
         }
-        // все paths провалились — в негативный кэш
+
+        // Keep the negative cache bounded on long-running devices.
+        if (failedVideos.size() >= 256) failedVideos.clear();
         failedVideos.put(videoId, System.currentTimeMillis());
         Log.w(TAG, "tryStream " + videoId + " -> neg cache (all failed)");
         return null;
@@ -368,22 +401,35 @@ public class Yt2009Client {
     }
 
     public void updateInstances() {
+        HttpURLConnection connection = null;
+        java.io.InputStream input = null;
         try {
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) new java.net.URL(INSTANCES_JSON_URL).openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(10000);
-            conn.setUseCaches(false);
+            connection = (HttpURLConnection) new URL(INSTANCES_JSON_URL).openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(10000);
+            connection.setUseCaches(false);
+            connection.setInstanceFollowRedirects(false);
 
-            if (conn.getResponseCode() != 200) return;
+            int status = connection.getResponseCode();
+            if (status != HttpURLConnection.HTTP_OK) {
+                Log.w(TAG, "Instance list returned HTTP " + status);
+                return;
+            }
 
-            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
-            StringBuilder response = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) response.append(line);
-            reader.close();
-
-            List<String> parsed = new com.google.gson.Gson().fromJson(response.toString(), new com.google.gson.reflect.TypeToken<List<String>>() {}.getType());
+            input = connection.getInputStream();
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                if (output.size() + count > 256 * 1024) {
+                    throw new java.io.IOException("Instance list exceeded 256 KiB");
+                }
+                output.write(buffer, 0, count);
+            }
+            String body = new String(output.toByteArray(), "UTF-8");
+            List<String> parsed = new com.google.gson.Gson().fromJson(
+                body, new com.google.gson.reflect.TypeToken<List<String>>() {}.getType());
             if (parsed == null) return;
 
             List<String> updated = new ArrayList<String>();
@@ -392,11 +438,15 @@ public class Yt2009Client {
                 String instance = value.trim();
                 if (instance.length() == 0) continue;
                 try {
-                    java.net.URL url = new java.net.URL(instance);
-                    String protocol = url.getProtocol();
-                    if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) continue;
+                    URL url = new URL(instance);
+                    // Discovered hosts are public fallback endpoints only. Never
+                    // allow a plaintext URL into a failover pool that may carry client headers.
+                    if (!"https".equalsIgnoreCase(url.getProtocol())) continue;
+                    if (url.getHost() == null || url.getHost().length() == 0) continue;
+                    if (url.getUserInfo() != null || url.getQuery() != null || url.getRef() != null) continue;
                     while (instance.endsWith("/")) instance = instance.substring(0, instance.length() - 1);
                     if (!updated.contains(instance)) updated.add(instance);
+                    if (updated.size() >= 100) break;
                 } catch (Exception ignored) {}
             }
 
@@ -405,9 +455,14 @@ public class Yt2009Client {
                 deadInstances.clear();
                 currentInstanceIndex = 0;
             }
-            Log.i(TAG, "Updated proxy instances: " + updated.size());
+            Log.i(TAG, "Updated HTTPS-only proxy instances: " + updated.size());
         } catch (Exception e) {
             Log.w(TAG, "Failed to update instances: " + e.getMessage());
+        } finally {
+            if (input != null) {
+                try { input.close(); } catch (Exception ignored) {}
+            }
+            if (connection != null) connection.disconnect();
         }
     }
 
