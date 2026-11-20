@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import fi.iki.elonen.NanoHTTPD;
 
 import java.io.IOException;
+import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
