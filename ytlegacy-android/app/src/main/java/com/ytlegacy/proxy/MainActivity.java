@@ -16,6 +16,10 @@ import android.os.Handler;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.Spinner;
+import android.widget.ArrayAdapter;
+import android.widget.AdapterView;
+import android.widget.ScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -138,6 +142,57 @@ public class MainActivity extends Activity {
         });
         addButton(layout, copyButton, density);
 
+        TextView qualityTitle = new TextView(this);
+        qualityTitle.setText("Playback quality");
+        qualityTitle.setTextColor(Color.WHITE);
+        qualityTitle.setTextSize(20);
+        qualityTitle.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams qualityTitleParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        qualityTitleParams.topMargin = (int) (14 * density + 0.5f);
+        qualityTitleParams.bottomMargin = (int) (6 * density + 0.5f);
+        layout.addView(qualityTitle, qualityTitleParams);
+
+        final String[] qualityValues = {"360p", "480p", "720p", "auto"};
+        String[] qualityLabels = {"360p · recommended", "480p", "720p", "Auto · best up to 720p"};
+        final TextView qualityStatus = new TextView(this);
+        qualityStatus.setTextColor(Color.LTGRAY);
+        qualityStatus.setTextSize(12);
+        qualityStatus.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams qualityStatusParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        qualityStatusParams.bottomMargin = (int) (5 * density + 0.5f);
+
+        Spinner qualitySpinner = new Spinner(this);
+        ArrayAdapter<String> qualityAdapter = new ArrayAdapter<String>(
+            this, android.R.layout.simple_spinner_item, qualityLabels);
+        qualityAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        qualitySpinner.setAdapter(qualityAdapter);
+
+        String savedQuality = PlaybackSettings.getQuality(this);
+        int selectedQuality = 0;
+        for (int i = 0; i < qualityValues.length; i++) {
+            if (qualityValues[i].equals(savedQuality)) selectedQuality = i;
+        }
+        qualitySpinner.setSelection(selectedQuality);
+        qualityStatus.setText("New playback requests use " + qualityLabels[selectedQuality] + ".");
+        qualitySpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                String selected = qualityValues[position];
+                if (PlaybackSettings.setQuality(MainActivity.this, selected)) {
+                    qualityStatus.setText("Saved · " + qualityLabels[position]
+                        + ". Applies to new playback requests.");
+                } else {
+                    qualityStatus.setText("Could not save playback quality.");
+                }
+            }
+
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        layout.addView(qualitySpinner, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        layout.addView(qualityStatus, qualityStatusParams);
+
         TextView accountTitle = new TextView(this);
         accountTitle.setText("yt2009 account");
         accountTitle.setTextColor(Color.WHITE);
@@ -206,7 +261,10 @@ public class MainActivity extends Activity {
         privacyParams.topMargin = (int) (10 * density + 0.5f);
         layout.addView(privacy, privacyParams);
 
-        setContentView(layout);
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setFillViewport(true);
+        scrollView.addView(layout);
+        setContentView(scrollView);
     }
 
     private void startGoogleLogin() {
