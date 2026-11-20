@@ -152,7 +152,7 @@ public final class InvidiousClient {
                     });
                 }
                 executor.shutdown();
-                try { latch.await(15L, TimeUnit.SECONDS); } catch (InterruptedException ignored) {
+                try { latch.await(70L, TimeUnit.SECONDS); } catch (InterruptedException ignored) {
                     Thread.currentThread().interrupt();
                 }
                 synchronized (lock) {
@@ -233,10 +233,14 @@ public final class InvidiousClient {
             if (!"https".equalsIgnoreCase(url.getProtocol())) return false;
             String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
             if (host.equals("googlevideo.com") || host.endsWith(".googlevideo.com")) return true;
+            int streamPort = url.getPort() < 0 ? url.getDefaultPort() : url.getPort();
             synchronized (lock) {
                 for (Server server : servers) {
-                    String allowed = new URL(server.base).getHost().toLowerCase(java.util.Locale.US);
-                    if (host.equals(allowed)) return true;
+                    URL allowedUrl = new URL(server.base);
+                    String allowedHost = allowedUrl.getHost().toLowerCase(java.util.Locale.US);
+                    int allowedPort = allowedUrl.getPort() < 0
+                        ? allowedUrl.getDefaultPort() : allowedUrl.getPort();
+                    if (host.equals(allowedHost) && streamPort == allowedPort) return true;
                 }
             }
         } catch (Exception ignored) {}
