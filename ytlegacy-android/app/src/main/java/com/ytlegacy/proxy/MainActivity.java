@@ -35,6 +35,7 @@ public class MainActivity extends Activity {
     private String lastPickerUrl = "";
     private final Handler loginHandler = new Handler();
     private boolean loginPollActive = false;
+    private boolean activityResumed = false;
     private boolean loginCompletionDialogShown = false;
     private int loginPollAttempts = 0;
     private static final long LOGIN_POLL_INTERVAL_MS = 5000L;
@@ -54,6 +55,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        activityResumed = true;
         if (loginPollActive) {
             loginHandler.removeCallbacks(loginPollRunnable);
             loginHandler.post(loginPollRunnable);
@@ -64,6 +66,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        activityResumed = false;
         loginHandler.removeCallbacks(loginPollRunnable);
         super.onPause();
     }
@@ -267,7 +270,7 @@ public class MainActivity extends Activity {
     }
 
     private void pollLoginStatus() {
-        if (!loginPollActive || isFinishing()) return;
+        if (!loginPollActive || !activityResumed || isFinishing()) return;
         if (!isServiceRunning()) {
             loginPollActive = false;
             accountStatus.setText("Proxy stopped · sign-in check paused");
@@ -280,7 +283,7 @@ public class MainActivity extends Activity {
                     final JSONObject result = requestLocal("/api/yt2009/login/status", "GET");
                     runOnUiThread(new Runnable() {
                         @Override public void run() {
-                            if (!loginPollActive || isFinishing()) return;
+                            if (!loginPollActive || !activityResumed || isFinishing()) return;
                             boolean authorized = result.optBoolean("authorized", false);
                             if (authorized) {
                                 loginPollActive = false;
