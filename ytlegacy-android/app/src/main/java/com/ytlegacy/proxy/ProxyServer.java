@@ -803,7 +803,7 @@ public class ProxyServer extends NanoHTTPD {
 
 
 
-    /** Metadata priority: fastest healthy Invidious, then yt2009 if the whole pool is down. */
+    /** Full player metadata resolution; feed cards use the separate bounded metadata-only path. */
     private VideoData getVideoData(String vid) {
         return getVideoData(vid, PlaybackSettings.getQuality(applicationContext));
     }
@@ -902,8 +902,7 @@ public class ProxyServer extends NanoHTTPD {
             }
         }
 
-        // InnerTube is the final metadata/stream fallback, or fills a missing
-        // playable stream after a metadata-only provider response.
+        // InnerTube is the final metadata/stream fallback for explicit player requests.
         if (resolveStream && ((!invidiousMetadataLoaded && !pipedMetadataLoaded
                 && !legacyMetadataLoaded)
                 || (v.streamUrl == null || v.streamUrl.isEmpty()))) {
