@@ -28,6 +28,7 @@ public class Yt2009Client {
     private int currentInstanceIndex = 0;
     private Map<String, Long> deadInstances = new HashMap<String, Long>();
     private static final long DEAD_TTL = 300000L;
+    private static final int MAX_STREAM_INSTANCE_ATTEMPTS = 4;
     private static final String FALLBACK_INSTANCE = "http://femboy.email:730";
     private static final String INSTANCES_JSON_URL = "http://144.31.189.129/notPipe.json";
     private static final String BROWSER_UA =
@@ -489,7 +490,7 @@ public class Yt2009Client {
         long now = System.currentTimeMillis();
         if (availableInstances != null && !availableInstances.isEmpty()) {
             int size = availableInstances.size();
-            for (int offset = 0; offset < size; offset++) {
+            for (int offset = 0; offset < size && ordered.size() < MAX_STREAM_INSTANCE_ATTEMPTS - 1; offset++) {
                 int index = (currentInstanceIndex + offset) % size;
                 String base = availableInstances.get(index);
                 Long deadAt = deadInstances.get(base);
@@ -497,7 +498,11 @@ public class Yt2009Client {
                     ordered.add(trimSlash(base));
             }
         }
-        ordered.add(FALLBACK_INSTANCE);
+
+        // The pinned historical host is only the final compatibility fallback,
+        // never the only or preferred source when community instances exist.
+        if (ordered.size() < MAX_STREAM_INSTANCE_ATTEMPTS)
+            ordered.add(FALLBACK_INSTANCE);
         return new ArrayList<String>(ordered);
     }
 
