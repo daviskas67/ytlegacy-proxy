@@ -25,7 +25,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: platform-tools
+          packages: "platform-tools, platforms;android-30, build-tools;30.0.3"
 
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-30" "build-tools;30.0.3"
@@ -43,11 +43,14 @@ jobs:
         working-directory: ytlegacy-android
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Upload debug APK
+      - name: Build unified YouTube + ytlegacy APK
+        run: bash scripts/build-unified-apk.sh
+
+      - name: Upload unified APK
         uses: actions/upload-artifact@v4
         with:
-          name: ytlegacy-proxy-v1.15-debug
-          path: ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk
+          name: ytlegacy-unified-v1.16
+          path: ytlegacy-android/build/unified/ytlegacy-5.0.21-v1.16-unified.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -198,4 +201,21 @@ jobs:
               --target "$GITHUB_SHA" \
               --title "ytlegacy-proxy v1.15" \
               --notes "ytlegacy-proxy v1.15 adds multi-provider video playback, Piped stream support, yt2009 community-instance stream failover, byte-range handling, and playback diagnostics."
+          fi
+
+      - name: Publish unified v1.16 GitHub Release
+        if: github.event_name == 'push' && github.event.head_commit.message == 'release v1.16'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="ytlegacy-android/build/unified/ytlegacy-5.0.21-v1.16-unified.apk"
+          ASSET="ytlegacy-5.0.21-v1.16-unified.apk"
+          if gh release view v1.16 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.16 "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            cp "$APK" "$ASSET"
+            gh release create v1.16 "$ASSET" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "ytlegacy YouTube 5.0.21 + proxy v1.16" \
+              --notes "Single-APK integration of the patched YouTube 5.0.21 client and ytlegacy-proxy. The local proxy auto-starts with YouTube and has its own entry in YouTube Settings."
           fi
