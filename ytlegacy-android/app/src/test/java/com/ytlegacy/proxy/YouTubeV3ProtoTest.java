@@ -1,7 +1,7 @@
 package com.ytlegacy.proxy;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonParser;
+import com.google.gson.JsonObject;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -18,10 +18,11 @@ public class YouTubeV3ProtoTest {
     public void activitiesUsesTheUploadFieldNumbersExpectedByYouTube5021() {
         String videoId = "abcdefghijk";
         String channelId = "UC1234567890123456789012";
-        JsonArray videos = new JsonParser().parse(
-            "[{\\"videoId\\":\\""+videoId+"\\"," +
-            "\\"authorId\\":\\""+channelId+"\\"}]"
-        ).getAsJsonArray();
+        JsonArray videos = new JsonArray();
+        JsonObject video = new JsonObject();
+        video.addProperty("videoId", videoId);
+        video.addProperty("authorId", channelId);
+        videos.add(video);
 
         byte[] encoded = YouTubeV3Proto.activities(videos, 20);
         List<Field> response = fields(encoded);
