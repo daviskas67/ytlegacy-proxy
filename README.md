@@ -3,7 +3,7 @@
 **A local compatibility proxy for the legacy YouTube 5.0.21 Android client.**  
 **Локальный прокси совместимости для старого Android-клиента YouTube 5.0.21.**
 
-[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11)
+[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12)
 
 ---
 
@@ -11,9 +11,16 @@
 
 ## Русский
 
-> 🎉 **ytlegacy-proxy v1.11 уже вышел!**  
-> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11). В этом выпуске добавлены привязка Google-аккаунта через yt2009 gsign и персональные рекомендации, а также расширенные пулы Invidious и Piped.
+> 🎉 **ytlegacy-proxy v1.12 уже вышел!**  
+> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12). В этом выпуске добавлена автоматическая проверка завершения yt2009 gsign и переход к выбору канала.
 
+
+### v1.12
+
+- После создания device code приложение автоматически проверяет статус привязки каждые 5 секунд, пока экран приложения открыт (до 15 минут).
+- Когда yt2009 подтверждает аккаунт, приложение останавливает опрос и предлагает открыть выбор YouTube-канала.
+- При сворачивании приложения опрос приостанавливается; после возвращения продолжается. При повторном запуске сохранённый device code и состояние входа восстанавливаются.
+- Ручное извлечение `oauth2_4` из сетевого потока Google по-прежнему выполняется на upstream-странице yt2009 на ПК. Автоматический перехват Google-токена не добавлялся.
 
 ### v1.11
 
@@ -75,7 +82,7 @@ Piped сейчас служит только резервом для публи�
 
 ### Авторизация аккаунта
 
-Войти можно из главного экрана приложения: **Start Google account sign-in** → завершить upstream-процесс на ПК → **Check sign-in status** → **Select YouTube channel**. После привязки прокси запрашивает персональную ленту yt2009 для старого клиента.
+Войти можно из главного экрана приложения: **Start Google account sign-in** → завершить upstream-процесс на ПК. Приложение само проверяет статус каждые 5 секунд и предложит открыть **Select YouTube channel**, когда привязка завершится. После этого прокси запрашивает персональную ленту yt2009 для старого клиента.
 
 Локальные endpoints:
 - `POST /api/yt2009/login/start` — создать device code.
@@ -139,7 +146,7 @@ gradle --no-daemon :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.11-debug` (доступен 14 дней) и публикует v1.11 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11).
+GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.12-debug` (доступен 14 дней) и публикует v1.12 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12).
 
 Проверочная сборка v1.11 прошла успешно: [GitHub Actions run #44706719157](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44706719157).
 
@@ -194,9 +201,16 @@ Invidious — неофициальный API совместимости. Пуб�
 
 ## English
 
-> 🎉 **ytlegacy-proxy v1.11 is here!**  
-> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11). This release adds yt2009 gsign account linking, channel selection, and personalized recommendations alongside the expanded Invidious and Piped pools.
+> 🎉 **ytlegacy-proxy v1.12 is here!**  
+> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12). This release adds automatic yt2009 gsign completion checks and a channel-picker prompt.
 
+
+### v1.12
+
+- After creating the device code, the app automatically checks the link status every five seconds while the app screen is in the foreground (up to 15 minutes).
+- When yt2009 confirms the account, polling stops and the app offers to open the YouTube channel picker.
+- Polling pauses while the app is backgrounded and resumes when it returns. The device code and login status are restored after relaunch.
+- Manual extraction of `oauth2_4` from Google's network flow on the upstream yt2009 PC page is still required. Automatic interception of Google tokens was not added.
 
 ### v1.11
 
@@ -258,7 +272,7 @@ Piped is currently used only as a fallback for public search and trending feeds.
 
 ### Account authorization
 
-From the app's main screen use **Start Google account sign-in**, complete the upstream flow on a PC, then tap **Check sign-in status** and **Select YouTube channel**. Once linked, the proxy requests the personalized yt2009 recommendations feed for the legacy client.
+From the app's main screen use **Start Google account sign-in**, then complete the upstream flow on a PC. The app checks the status every five seconds and offers to open **Select YouTube channel** once linking is complete. The proxy then requests the personalized yt2009 recommendations feed for the legacy client.
 
 Local endpoints:
 - `POST /api/yt2009/login/start` — create a device code.
@@ -320,7 +334,7 @@ The APK is generated at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.11-debug` artifact (available for 14 days) and publishes the v1.11 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11).
+GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.11-debug` artifact (available for 14 days) and publishes the v1.12 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12).
 
 The v1.11 verification build passed: [GitHub Actions run #44706719157](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44706719157).
 
