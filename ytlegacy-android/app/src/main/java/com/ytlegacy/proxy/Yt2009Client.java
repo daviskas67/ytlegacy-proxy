@@ -55,7 +55,7 @@ public class Yt2009Client {
         c.setRequestProperty("Referer", BASE + "/");
         if (session != null) {
             String range = session.getHeaders().get("range");
-            if (range != null) c.setRequestProperty("Range", range);
+            StreamHttpSupport.applyRangeHeader(c, range);
         }
         return c;
     }
@@ -439,7 +439,7 @@ public class Yt2009Client {
                     connection.setRequestProperty("User-Agent", BROWSER_UA);
                     if (session != null && session.getHeaders() != null) {
                         String range = session.getHeaders().get("range");
-                        if (range != null) connection.setRequestProperty("Range", range);
+                        StreamHttpSupport.applyRangeHeader(connection, range);
                     }
                     code = connection.getResponseCode();
                     redirects++;
@@ -448,10 +448,9 @@ public class Yt2009Client {
 
                 String contentType = connection.getContentType();
                 Log.i(TAG, "  final HTTP " + code + " ct=" + contentType);
-                if ((code == HttpURLConnection.HTTP_OK || code == HttpURLConnection.HTTP_PARTIAL)
-                        && contentType != null
-                        && (contentType.startsWith("video/")
-                            || contentType.startsWith("application/octet-stream"))) {
+                if (StreamHttpSupport.isRangeNotSatisfiable(code)
+                        || (StreamHttpSupport.isSuccessfulStreamStatus(code)
+                            && StreamHttpSupport.isPlayableContentType(contentType))) {
                     HttpURLConnection ready = connection;
                     connection = null; // Ownership transfers to ProxyServer.
                     failedVideos.remove(videoId);
