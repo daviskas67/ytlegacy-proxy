@@ -426,49 +426,11 @@ public class FeedXmlBuilder {
 
     /** "3:45" → 225, "1:02:03" → 3723, "LIVE" → 0 */
     private static String parseDuration(String s) {
-        if (s == null || s.isEmpty() || s.toUpperCase().contains("LIVE")) return "0";
-        try {
-            String[] parts = s.split(":");
-            int seconds = 0;
-            if (parts.length == 3) {
-                seconds = Integer.parseInt(parts[0]) * 3600
-                        + Integer.parseInt(parts[1]) * 60
-                        + Integer.parseInt(parts[2]);
-            } else if (parts.length == 2) {
-                seconds = Integer.parseInt(parts[0]) * 60 + Integer.parseInt(parts[1]);
-            } else if (parts.length == 1) {
-                seconds = Integer.parseInt(parts[0]);
-            }
-            return String.valueOf(seconds);
-        } catch (Exception e) {
-            return "0";
-        }
+        return String.valueOf(VideoData.parseDurationToSec(s));
     }
 
-    /** "3 years ago" → 2022-01-01T00:00:00.000Z */
     private static String parseRelativeTime(String text) {
-        if (text == null) return "2013-01-01T00:00:00.000Z";
-        Matcher m = Pattern.compile("(\\d+)\\s+(second|minute|hour|day|week|month|year)s?\\s+ago")
-                .matcher(text.toLowerCase());
-        if (!m.find()) return "2013-01-01T00:00:00.000Z";
-
-        int n = Integer.parseInt(m.group(1));
-        String unit = m.group(2);
-        long now = System.currentTimeMillis();
-        long offset;
-        switch (unit) {
-            case "second": offset = n * 1000L; break;
-            case "minute": offset = n * 60L * 1000; break;
-            case "hour":   offset = n * 3600L * 1000; break;
-            case "day":    offset = n * 86400L * 1000; break;
-            case "week":   offset = n * 7L * 86400 * 1000; break;
-            case "month":  offset = n * 30L * 86400 * 1000; break;
-            case "year":   offset = n * 365L * 86400 * 1000; break;
-            default:       offset = 0;
-        }
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
-        return sdf.format(new Date(now - offset));
+        return VideoData.parseRelativeTime(text);
     }
 
     private static String getStr(JsonObject o, String k) {
