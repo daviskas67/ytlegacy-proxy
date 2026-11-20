@@ -3,7 +3,7 @@
 **A local compatibility proxy for the legacy YouTube 5.0.21 Android client.**  
 **Локальный прокси совместимости для старого Android-клиента YouTube 5.0.21.**
 
-[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10)
+[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11)
 
 ---
 
@@ -11,9 +11,20 @@
 
 ## Русский
 
-> 🎉 **ytlegacy-proxy v1.10 уже вышел!**  
-> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10). В этом выпуске добавлены большие HTTPS-пулы Invidious и Piped, а Piped подключён как резервный источник поиска и популярных видео.
+> 🎉 **ytlegacy-proxy v1.11 уже вышел!**  
+> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11). В этом выпуске добавлены привязка Google-аккаунта через yt2009 gsign и персональные рекомендации, а также расширенные пулы Invidious и Piped.
 
+
+### v1.11
+
+- Добавлено подключение Google-аккаунта через штатный legacy-процесс yt2009 `gsign` на `femboy.email:730`.
+- Приложение запрашивает семизначный device code, показывает адрес страницы для завершения входа на ПК и умеет проверять состояние привязки.
+- Добавлена кнопка выбора YouTube-канала через upstream `account_picker.html`.
+- Запросы публичных рекомендаций `/feeds/api/users/default/subscriptions` и `activity` сначала пытаются получить персональную ленту с `/feeds/api/users/default/recommendations`.
+- Идентификатор устройства передаётся только на закреплённый `femboy.email:730`; он не отправляется в пулы Invidious, Piped или случайные yt2009-инстансы.
+- Добавлены локальные endpoints `/api/yt2009/login/start`, `/api/yt2009/login/status` и `/api/yt2009/login/picker`.
+
+**Важно:** `gsign` — не стандартный OAuth 2.0. В upstream-процессе пользователь вручную передаёт Google authorization token серверу yt2009. Указанный инстанс использует обычный HTTP, поэтому токен и данные сессии могут быть перехвачены при наблюдении за сетевым трафиком. Используй этот вход только потому, что доверяешь именно этому хосту и сети. Сам прокси хранит локально только device code; обработка токена и аккаунтная сессия остаются на yt2009.
 
 ### v1.10
 
@@ -64,7 +75,14 @@ Piped сейчас служит только резервом для публи�
 
 ### Авторизация аккаунта
 
-В v1.10 вход в Google-аккаунт не реализован. Авторизация `gsign` в upstream yt2009 не является стандартным OAuth-редиректом и требует передачи чувствительных данных авторизации стороннему серверу. Прокси не отправляет Google-токены публичным инстансам Invidious, Piped или yt2009. Поэтому текущая лента остаётся публичной, а не персональной. Безопасная интеграция потребует отдельного OAuth-клиента Google и явной настройки YouTube API.
+Войти можно из главного экрана приложения: **Start Google account sign-in** → завершить upstream-процесс на ПК → **Check sign-in status** → **Select YouTube channel**. После привязки прокси запрашивает персональную ленту yt2009 для старого клиента.
+
+Локальные endpoints:
+- `POST /api/yt2009/login/start` — создать device code.
+- `GET /api/yt2009/login/status` — проверить привязку и получить список каналов.
+- `GET /api/yt2009/login/picker` — открыть upstream channel picker.
+
+Это именно legacy `gsign`, а не стандартный OAuth 2.0. Он передаёт Google authorization token на выбранный сервер yt2009 по обычному HTTP. Не используй его в недоверенной сети. Прокси не хранит Google token и отправляет device identifier только на `femboy.email:730`.
 
 ### Диагностика
 
@@ -76,6 +94,7 @@ Piped сейчас служит только резервом для публи�
 | `/api/status` | Состояние сервиса |
 | `/api/invidious` | Состояние каждого Invidious-экземпляра, задержка, ошибки и выбранный сервер |
 | `/api/piped` | Состояние каждого Piped API-инстанса и задержки |
+| `/api/yt2009/login/status` | Состояние привязки yt2009 и список каналов |
 | `/api/cache` | Статистика локального кэша |
 | `/api/video/{id}` | Диагностика метаданных конкретного видео |
 
@@ -85,6 +104,7 @@ Piped сейчас служит только резервом для публи�
 - [http://127.0.0.1:8080/api/status](http://127.0.0.1:8080/api/status)
 - [http://127.0.0.1:8080/api/invidious](http://127.0.0.1:8080/api/invidious)
 - [http://127.0.0.1:8080/api/piped](http://127.0.0.1:8080/api/piped)
+- [http://127.0.0.1:8080/api/yt2009/login/status](http://127.0.0.1:8080/api/yt2009/login/status)
 - [http://127.0.0.1:8080/api/cache](http://127.0.0.1:8080/api/cache)
 - [http://127.0.0.1:8080/api/video/VIDEO_ID](http://127.0.0.1:8080/api/video/VIDEO_ID)
 
@@ -119,7 +139,7 @@ gradle --no-daemon :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.10-debug` (доступен 14 дней) и публикует v1.10 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10).
+GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.11-debug` (доступен 14 дней) и публикует v1.11 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11).
 
 Дополнительный скрипт `build-manual.sh` рассчитан на окружения, где уже доступны Android SDK tools, D8, Gson 2.2.4 и NanoHTTPD 2.3.1 JAR-файлы.
 
@@ -172,9 +192,20 @@ Invidious — неофициальный API совместимости. Пуб�
 
 ## English
 
-> 🎉 **ytlegacy-proxy v1.10 is here!**  
-> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10). This release adds HTTPS-only community pools for Invidious and Piped, with Piped serving as a secondary source for search and trending feeds.
+> 🎉 **ytlegacy-proxy v1.11 is here!**  
+> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11). This release adds yt2009 gsign account linking, channel selection, and personalized recommendations alongside the expanded Invidious and Piped pools.
 
+
+### v1.11
+
+- Added Google account linking through the upstream yt2009 legacy `gsign` flow on `femboy.email:730`.
+- The app requests a seven-character device code, displays the desktop sign-in URL, and can check whether the account has been linked.
+- Added a YouTube channel picker using the upstream `account_picker.html` page.
+- Legacy public recommendations routes `/feeds/api/users/default/subscriptions` and `activity` now try the personalized `/feeds/api/users/default/recommendations` feed first.
+- The device identifier is sent only to the pinned `femboy.email:730` host. It is never sent to Invidious, Piped, or dynamically discovered yt2009 instances.
+- Added local endpoints `/api/yt2009/login/start`, `/api/yt2009/login/status`, and `/api/yt2009/login/picker`.
+
+**Important:** `gsign` is not standard OAuth 2.0. The upstream flow has the user manually submit a Google authorization token to the yt2009 server. The configured instance uses plain HTTP, so the token and session data can be intercepted by anyone able to observe that network traffic. Use this only because you trust this specific host and network. The proxy stores only the local device code; token processing and the account session stay on yt2009.
 
 ### v1.10
 
@@ -225,7 +256,14 @@ Piped is currently used only as a fallback for public search and trending feeds.
 
 ### Account authorization
 
-Google account sign-in is not implemented in v1.10. The upstream yt2009 `gsign` flow is not a standard OAuth redirect and requires handing sensitive authorization material to a third-party server. This proxy does not send Google tokens to public Invidious, Piped, or yt2009 instances. The current feed therefore remains public, not personalized. A safe integration needs a separately configured Google OAuth client and YouTube API access.
+From the app's main screen use **Start Google account sign-in**, complete the upstream flow on a PC, then tap **Check sign-in status** and **Select YouTube channel**. Once linked, the proxy requests the personalized yt2009 recommendations feed for the legacy client.
+
+Local endpoints:
+- `POST /api/yt2009/login/start` — create a device code.
+- `GET /api/yt2009/login/status` — check linking and retrieve available channels.
+- `GET /api/yt2009/login/picker` — open the upstream channel picker.
+
+This is yt2009's legacy `gsign` flow, not standard OAuth 2.0. It sends a Google authorization token to the selected yt2009 server over plain HTTP. Do not use it on an untrusted network. The proxy does not store the Google token and sends the device identifier only to `femboy.email:730`.
 
 ### Diagnostics
 
@@ -237,6 +275,7 @@ After the service starts, open the relevant endpoint on the device:
 | `/api/status` | Service status |
 | `/api/invidious` | Per-instance health, latency, failures, and selected server |
 | `/api/piped` | Per-instance Piped API health and latency |
+| `/api/yt2009/login/status` | yt2009 account-link status and available channels |
 | `/api/cache` | Local cache statistics |
 | `/api/video/{id}` | Metadata diagnostics for a video |
 
@@ -279,7 +318,7 @@ The APK is generated at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.10-debug` artifact (available for 14 days) and publishes the v1.10 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10).
+GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.11-debug` artifact (available for 14 days) and publishes the v1.11 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.11).
 
 The optional `build-manual.sh` script is intended for environments that already provide Android SDK tools, D8, Gson 2.2.4, and NanoHTTPD 2.3.1 JARs.
 
