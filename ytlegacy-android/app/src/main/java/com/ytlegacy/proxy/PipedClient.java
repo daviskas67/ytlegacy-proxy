@@ -162,6 +162,12 @@ public final class PipedClient {
         return normalizeVideos(result);
     }
 
+    /** Short trending lookup for the legacy home-feed bootstrap. */
+    public JsonArray trendingForFeed() {
+        JsonElement result = getJson("/trending?region=PL", 2, 1000, 1500, 2500L);
+        return normalizeVideos(result);
+    }
+
     /** Fetches unauthenticated stream metadata through the healthy Piped instance pool. */
     public JsonObject streams(String videoId) {
         if (!validVideoId(videoId)) return null;
