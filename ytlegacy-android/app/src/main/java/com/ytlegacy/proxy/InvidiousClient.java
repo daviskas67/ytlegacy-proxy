@@ -215,6 +215,13 @@ public final class InvidiousClient {
         return result != null && result.isJsonArray() ? result.getAsJsonArray() : null;
     }
 
+    /** Short trending lookup for the legacy home-feed bootstrap. */
+    public JsonArray trendingForFeed() {
+        JsonElement result = getJson("/api/v1/trending?type=default&region=PL",
+            2, 1000, 1500, 2500L);
+        return result != null && result.isJsonArray() ? result.getAsJsonArray() : null;
+    }
+
     public JsonObject playlist(String playlistId, int page) {
         JsonElement result = getJson("/api/v1/playlists/" + encode(playlistId) + "?page=" + Math.max(1, page));
         return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
