@@ -45,13 +45,11 @@ public final class StreamHttpSupport {
     }
 
     public static boolean isSafeRedirectTarget(java.net.URL url) {
-        if (url == null || url.getHost() == null) return false;
+        if (url == null || url.getHost() == null || url.getUserInfo() != null) return false;
         String protocol = url.getProtocol() == null ? "" : url.getProtocol().toLowerCase(java.util.Locale.US);
         String host = url.getHost().toLowerCase(java.util.Locale.US);
-        if ("https".equals(protocol)
-                && (host.equals("googlevideo.com") || host.endsWith(".googlevideo.com"))) return true;
         int port = url.getPort() < 0 ? url.getDefaultPort() : url.getPort();
-        return ("http".equals(protocol) || "https".equals(protocol))
-            && host.equals("femboy.email") && port == 730;
+        return "https".equals(protocol) && port == 443
+            && (host.equals("googlevideo.com") || host.endsWith(".googlevideo.com"));
     }
 }
