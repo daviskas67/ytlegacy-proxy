@@ -85,17 +85,19 @@ def patch_application_start(path: pathlib.Path) -> None:
     if ".locals 1" not in method:
         raise SystemExit("Unexpected BaseApplication.onCreate() register layout")
     method = method.replace(".locals 1", ".locals 2", 1)
-    marker = "    return-void"
-    pos = method.rfind(marker)
+    marker = "    invoke-super {p0}, Landroid/app/Application;->onCreate()V"
+    pos = method.find(marker)
     if pos < 0:
-        raise SystemExit("BaseApplication.onCreate() return was not found")
-    launch = """    # Start the embedded local API before YouTube sends requests to 127.0.0.1.
+        raise SystemExit("BaseApplication.onCreate() Application super call was not found")
+    pos += len(marker)
+    launch = """
+
+    # Start the embedded local API before YouTube initializes its clients.
     new-instance v0, Landroid/content/Intent;
     const-class v1, Lcom/ytlegacy/proxy/ProxyService;
     invoke-direct {v0, p0, v1}, Landroid/content/Intent;-><init>(Landroid/content/Context;Ljava/lang/Class;)V
     invoke-virtual {p0, v0}, Landroid/content/Context;->startService(Landroid/content/Intent;)Landroid/content/ComponentName;
     move-result-object v0
-
 """
     method = method[:pos] + launch + method[pos:]
     source = source[:start] + method + source[end:]
