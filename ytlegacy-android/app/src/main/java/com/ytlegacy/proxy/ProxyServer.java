@@ -801,7 +801,7 @@ public class ProxyServer extends NanoHTTPD {
         // Piped /streams provides metadata as well as stream candidates. Use it
         // when Invidious is unavailable or did not supply a usable stream.
         boolean pipedMetadataLoaded = false;
-        if (!invidiousMetadataLoaded && (!resolveStream || v.streamUrl == null || v.streamUrl.isEmpty())) {
+        if (!invidiousMetadataLoaded || (resolveStream && (v.streamUrl == null || v.streamUrl.isEmpty()))) {
             try {
                 JsonObject data = piped.streams(vid);
                 VideoData fromPiped = VideoData.fromPiped(data, vid, quality);
