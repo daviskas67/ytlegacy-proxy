@@ -360,7 +360,7 @@ public final class PipedClient {
         synchronized (lock) { return servers.size(); }
     }
 
-    private int getHealthyCount() {
+    public int getHealthyCount() {
         synchronized (lock) { return getHealthyCountLocked(); }
     }
 
