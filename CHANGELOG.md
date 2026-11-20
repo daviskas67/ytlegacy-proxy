@@ -10,8 +10,10 @@
 - Добавлена повторная проверка итогового APK после декодирования: package, исходный launcher, service, settings preference и автозапуск.
 
 ### Fixed
-- Исправлены protobuf field numbers для `contentDetails.upload` и вложенного `upload.videoId`: клиент YouTube 5.0.21 ожидает поле `10101` на обоих уровнях. Прежний ответ оставлял объект Upload пустым и приводил к `NullPointerException` в адаптере ленты.
-- Добавлен regression-тест, который декодирует ответ `activities` и проверяет реальные номера/типы вложенных protobuf-полей.
+- Исправлены protobuf field numbers для `contentDetails.upload` и вложенного `upload.videoId`: клиент YouTube 5.0.21 ожидает поле `10101` на обоих уровнях.
+- Исправлена структура protobuf `Video`: поле 4 теперь содержит `status`, поле 5 — `statistics`, а `viewCount`/`likeCount` кодируются varint. Ранее статистика попадала в поле 4, из-за чего поле 5 оставалось null и адаптер ленты падал при вызове `Video.e().a()`.
+- Сопоставлены поля `VideoSnippet` с декомпилированным парсером YouTube 5.0.21: `publishedAt=1`, `title=4`, `description=5`, `channelTitle=7`.
+- Добавлены regression-тесты, декодирующие ответы `activities` и `videos` и проверяющие вложенные protobuf-поля и wire types.
 
 - Маршрут `/youtube/v3/videos` больше не зависит только от Invidious: при недоступности Invidious используется Piped, затем yt2009 и InnerTube для метаданных.
 - Добавлен разбор метаданных Piped `/streams/{videoId}`, включая автора, описание, длительность, просмотры и лайки; прогрессивный MP4 выбирается только при соблюдении существующих проверок формата.
