@@ -42,7 +42,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ytlegacy-proxy-v1.12-debug
+          name: ytlegacy-proxy-v1.13-debug
           path: ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -143,4 +143,21 @@ jobs:
               --target "$GITHUB_SHA" \
               --title "ytlegacy-proxy v1.12" \
               --notes "ytlegacy-proxy v1.12 adds automatic yt2009 gsign status polling and a channel-picker prompt."
+          fi
+
+      - name: Publish v1.13 GitHub Release
+        if: github.event_name == 'push' && github.event.head_commit.message == 'release v1.13'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk"
+          ASSET="ytlegacy-proxy-v1.13.apk"
+          cp "$APK" "$ASSET"
+          if gh release view v1.13 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.13 "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v1.13 "$ASSET" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "ytlegacy-proxy v1.13" \
+              --notes "ytlegacy-proxy v1.13 adds a shareable sign-in guide and clearer account/channel status."
           fi
