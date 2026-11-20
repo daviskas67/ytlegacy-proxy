@@ -959,7 +959,7 @@ public class ProxyServer extends NanoHTTPD {
             }
             Response response = proxyVideo(video.streamUrl, session);
             int status = response.getStatus().getRequestStatus();
-            if (status == 200 || status == 206) {
+            if (status == 200 || status == 206 || status == 416) {
                 Log.i(TAG, "Invidious stream OK for " + videoId + " itag=" + video.itag);
                 return response;
             }
@@ -982,7 +982,7 @@ public class ProxyServer extends NanoHTTPD {
 
             Response response = proxyVideo(selected.url, session, selected.proxyUrl);
             int status = response.getStatus().getRequestStatus();
-            if (status == 200 || status == 206) {
+            if (status == 200 || status == 206 || status == 416) {
                 Log.i(TAG, "Piped stream OK for " + videoId + " height="
                     + selected.height + " codec=" + selected.codec);
                 return response;
@@ -1010,7 +1010,7 @@ public class ProxyServer extends NanoHTTPD {
 
             Response response = proxyVideo(modern.streamUrl, session);
             int status = response.getStatus().getRequestStatus();
-            if (status == 200 || status == 206) {
+            if (status == 200 || status == 206 || status == 416) {
                 Log.i(TAG, "InnerTube stream OK for " + videoId + " itag=" + modern.itag);
                 return response;
             }
