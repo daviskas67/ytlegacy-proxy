@@ -64,7 +64,7 @@ public final class YouTubeV3Proto {
             // These field numbers match the generated VideoSnippet parser in
             // the bundled YouTube 5.0.21 client: publishedAt=1, title=4,
             // description=5, channelTitle=7.
-            snippet.string(1, str(data, "published", ""));
+            snippet.string(1, str(data, "published"));
             snippet.string(4, str(data, "title"));
             snippet.string(5, str(data, "description"));
             snippet.string(7, str(data, "author"));
