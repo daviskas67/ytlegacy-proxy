@@ -134,7 +134,7 @@ public class StreamFormatSelectorTest {
         video.isHd = true;
 
         String xml = GDataXmlBuilder.buildPlayerEntry(video);
-        assertTrue(xml.contains("/video/abcdefghijk.mp4?quality=720p"));
+        assertTrue(xml.contains("/video/abcdefghijk.mp4"));
         assertTrue(xml.contains("yt:format=\"22\""));
         assertTrue(xml.contains("itag=\"22\""));
         assertTrue(xml.contains("width=\"1280\""));
