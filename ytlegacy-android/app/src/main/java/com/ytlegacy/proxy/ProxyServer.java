@@ -844,7 +844,10 @@ public class ProxyServer extends NanoHTTPD {
             }
         }
 
-        if (!invidiousMetadataLoaded && !legacyMetadataLoaded) {
+        // Ask InnerTube for a stream when Invidious metadata is valid but
+        // has no complete progressive MP4, or when yt2009 supplied metadata only.
+        if ((!invidiousMetadataLoaded && !legacyMetadataLoaded)
+                || v.streamUrl == null || v.streamUrl.isEmpty()) {
             try {
                 VideoData modern = VideoData.fromInnerTube(innerTube.player(vid), quality);
                 if (modern != null) {
@@ -860,7 +863,16 @@ public class ProxyServer extends NanoHTTPD {
                     }
                     if (modern.likeCount > 0) v.likeCount = modern.likeCount;
                     v.isLive = modern.isLive;
-                    Log.i(TAG, "getVideoData: InnerTube tertiary fallback used for " + vid);
+                    if ((v.streamUrl == null || v.streamUrl.isEmpty())
+                            && modern.streamUrl != null && !modern.streamUrl.isEmpty()) {
+                        v.streamUrl = modern.streamUrl;
+                        v.itag = modern.itag;
+                        v.mimeType = modern.mimeType;
+                        v.width = modern.width;
+                        v.height = modern.height;
+                        v.isHd = modern.isHd;
+                    }
+                    Log.i(TAG, "getVideoData: InnerTube metadata/stream fallback used for " + vid);
                 }
             } catch (Exception e) {
                 Log.w(TAG, "getVideoData: InnerTube fallback failed: " + e.getMessage());
