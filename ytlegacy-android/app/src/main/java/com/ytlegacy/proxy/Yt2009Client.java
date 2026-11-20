@@ -313,6 +313,11 @@ public class Yt2009Client {
      * Порядок: exp_hd (MP4 itag 22/37) -> get_480 (FLV itag 35) -> get_video (MP4 itag 5).
      */
     public HttpURLConnection tryStream(String videoId, NanoHTTPD.IHTTPSession session) {
+        return tryStream(videoId, session, null);
+    }
+
+    /** Selects a progressive MP4 matching the requested quality before legacy endpoint fallback. */
+    public HttpURLConnection tryStream(String videoId, NanoHTTPD.IHTTPSession session, String quality) {
         if (videoId == null || !videoId.matches("[A-Za-z0-9_-]{11}")) return null;
 
         long now = System.currentTimeMillis();
@@ -325,6 +330,80 @@ public class Yt2009Client {
             failedVideos.remove(videoId);
         }
 
+        try {
+            Info info = getVideoInfo(videoId);
+            Yt2009FormatSelector.Selection selected =
+                Yt2009FormatSelector.select(info.fmtUrls, quality);
+            if (selected != null) {
+                HttpURLConnection direct = openSelectedFormat(selected.url, session);
+                if (direct != null) {
+                    failedVideos.remove(videoId);
+                    Log.i(TAG, "yt2009 fmt_stream_map selected itag=" + selected.itag
+                        + " height=" + selected.height + " quality=" + quality);
+                    return direct;
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "yt2009 format-map selection failed: " + e.getMessage());
+        }
+
+        return tryStreamEndpointFallback(videoId, session);
+    }
+
+    private HttpURLConnection openSelectedFormat(String rawUrl, NanoHTTPD.IHTTPSession session) {
+        HttpURLConnection connection = null;
+        try {
+            URL current = new URL(rawUrl);
+            String range = null;
+            if (session != null && session.getHeaders() != null) {
+                range = session.getHeaders().get("range");
+            }
+
+            for (int redirects = 0; redirects <= 5; redirects++) {
+                if (!StreamHttpSupport.isSafeRedirectTarget(current)) {
+                    Log.w(TAG, "Rejected yt2009 format URL/redirect host: " + current);
+                    return null;
+                }
+
+                connection = (HttpURLConnection) current.openConnection();
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(120000);
+                connection.setInstanceFollowRedirects(false);
+                connection.setRequestProperty("User-Agent", BROWSER_UA);
+                connection.setRequestProperty("Referer", BASE + "/");
+                StreamHttpSupport.applyRangeHeader(connection, range);
+
+                int code = connection.getResponseCode();
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String location = connection.getHeaderField("Location");
+                    if (location == null || location.trim().length() == 0 || redirects == 5) break;
+                    URL next = new URL(current, location);
+                    connection.disconnect();
+                    connection = null;
+                    current = next;
+                    continue;
+                }
+
+                String contentType = connection.getContentType();
+                if (StreamHttpSupport.isSuccessfulStreamStatus(code)
+                        && StreamHttpSupport.isPlayableContentType(contentType)) {
+                    HttpURLConnection ready = connection;
+                    connection = null;
+                    return ready;
+                }
+
+                Log.w(TAG, "yt2009 selected format HTTP " + code + " contentType=" + contentType);
+                break;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "yt2009 selected format unavailable: " + e.getMessage());
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+        return null;
+    }
+
+    private HttpURLConnection tryStreamEndpointFallback(String videoId, NanoHTTPD.IHTTPSession session) {
         // Prefer progressive MP4; the old client cannot reliably play FLV.
         String[] paths = {
             "/exp_hd?video_id=" + videoId,
