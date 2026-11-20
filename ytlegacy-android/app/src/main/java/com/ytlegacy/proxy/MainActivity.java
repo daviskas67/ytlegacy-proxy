@@ -187,7 +187,7 @@ public class MainActivity extends Activity {
         addButton(layout, pickerButton, density);
 
         TextView privacy = new TextView(this);
-        privacy.setText("yt2009 gsign sends the Google authorization token to femboy.email over plain HTTP. The token can be intercepted on an untrusted network. Use only if you trust this host and network; the proxy itself does not store the token.");
+        privacy.setText("Never enter your Google password on the yt2009 page. Sign in only on accounts.google.com. yt2009 then sends an authorization token to femboy.email over plain HTTP, which can be intercepted on an untrusted network.");
         privacy.setTextColor(Color.GRAY);
         privacy.setTextSize(11);
         privacy.setGravity(Gravity.CENTER);
@@ -344,7 +344,7 @@ public class MainActivity extends Activity {
                 } catch (final Exception e) {
                     runOnUiThread(new Runnable() {
                         @Override public void run() {
-                            if (!loginPollActive || isFinishing()) return;
+                            if (!loginPollActive || !activityResumed || isFinishing()) return;
                             if (loginPollAttempts >= LOGIN_POLL_LIMIT) {
                                 loginPollActive = false;
                                 accountStatus.setText("Status unavailable · tap Check sign-in status");
