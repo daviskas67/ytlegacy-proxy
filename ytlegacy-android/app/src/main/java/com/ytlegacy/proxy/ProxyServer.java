@@ -686,7 +686,7 @@ public class ProxyServer extends NanoHTTPD {
                 if (invidiousStream != null) return invidiousStream;
 
                 if (invidious.getHealthyCount() == 0) {
-                    java.net.HttpURLConnection yc = yt2009.tryStream(vid, session);
+                    java.net.HttpURLConnection yc = yt2009.tryStream(vid, session, requestedQuality);
                     if (yc != null) {
                         Log.i(TAG, "STREAM via yt2009 fallback OK");
                         return buildStreamResponse(yc);
@@ -973,14 +973,21 @@ public class ProxyServer extends NanoHTTPD {
         boolean handedOff = false;
         try {
             int code = yc.getResponseCode();
-            if (code != HttpURLConnection.HTTP_OK && code != HttpURLConnection.HTTP_PARTIAL) {
+            if (StreamHttpSupport.isRangeNotSatisfiable(code)) {
+                Response response = text(Response.Status.RANGE_NOT_SATISFIABLE, "Range Not Satisfiable");
+                String contentRange = yc.getHeaderField("Content-Range");
+                if (contentRange != null) response.addHeader("Content-Range", contentRange);
+                response.addHeader("Accept-Ranges", "bytes");
+                return response;
+            }
+            if (!StreamHttpSupport.isSuccessfulStreamStatus(code)) {
                 return text(Response.Status.INTERNAL_ERROR, "yt2009 stream HTTP " + code);
             }
             String contentType = yc.getContentType();
             if (contentType == null) contentType = "video/mp4";
             int length = yc.getContentLength();
             java.io.InputStream input = disconnectingStream(yc, yc.getInputStream());
-            Response.Status status = code == HttpURLConnection.HTTP_PARTIAL
+            Response.Status status = StreamHttpSupport.isPartialContent(code)
                 ? Response.Status.PARTIAL_CONTENT : Response.Status.OK;
             Response response = length >= 0
                 ? newFixedLengthResponse(status, contentType, input, length)
@@ -1256,7 +1263,7 @@ public class ProxyServer extends NanoHTTPD {
                 connection.setRequestProperty("User-Agent",
                     "com.google.android.youtube/5.0.21 (Linux; U; Android 4.4.2; en_US)");
                 connection.setInstanceFollowRedirects(false);
-                if (range != null) connection.setRequestProperty("Range", range);
+                StreamHttpSupport.applyRangeHeader(connection, range);
 
                 int code = connection.getResponseCode();
                 if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
