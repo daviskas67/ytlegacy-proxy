@@ -940,10 +940,12 @@ public class ProxyServer extends NanoHTTPD {
                 }
             },
             new SourceManager.DataCheck<Response>() {
-                @Override public boolean hasData(Response response) {
-                    if (response == null || response.getStatus() == null) return false;
+                @Override public boolean hasData(Response response) throws Exception {
+                    if (response == null || response.getStatus() == null)
+                        throw new IOException("Provider returned no playback response");
                     int status = response.getStatus().getRequestStatus();
-                    return status == 200 || status == 206 || status == 416;
+                    if (status == 200 || status == 206 || status == 416) return true;
+                    throw new IOException("Provider returned HTTP " + status);
                 }
             });
     }
