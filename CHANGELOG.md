@@ -9,6 +9,10 @@
 - Классы прокси и зависимости объединяются с исходным клиентом в единственный `classes.dex` для совместимости с Android API 8.
 - Добавлена повторная проверка итогового APK после декодирования: package, исходный launcher, service, settings preference и автозапуск.
 
+### Fixed
+- Исправлены protobuf field numbers для `contentDetails.upload` и вложенного `upload.videoId`: клиент YouTube 5.0.21 ожидает поле `10101` на обоих уровнях. Прежний ответ оставлял объект Upload пустым и приводил к `NullPointerException` в адаптере ленты.
+- Добавлен regression-тест, который декодирует ответ `activities` и проверяет реальные номера/типы вложенных protobuf-полей.
+
 ### Verification
 - CI: JVM unit tests, сборка прокси, объединение APK, single-DEX/method-reference check, round-trip decode и проверка подписи.
 - Воспроизведение, перемотка, автозапуск на устройстве и открытие пункта настроек требуют финальной проверки на реальном Android.
