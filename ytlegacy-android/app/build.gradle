@@ -8,8 +8,8 @@ android {
         applicationId "com.ytlegacy.proxy"
         minSdkVersion 8
         targetSdkVersion 19
-        versionCode 12
-        versionName "1.15"
+        versionCode 13
+        versionName "1.16"
     }
 
     buildTypes {
