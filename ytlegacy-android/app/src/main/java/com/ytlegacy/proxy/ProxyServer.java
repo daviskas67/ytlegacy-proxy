@@ -169,7 +169,7 @@ public class ProxyServer extends NanoHTTPD {
                     String quality = PlaybackSettings.getQuality(applicationContext);
                     for (String id : ids) {
                         if (!VIDEO_ID.matcher(id).matches()) continue;
-                        VideoData video = getVideoData(id, quality);
+                        VideoData video = getVideoData(id, quality, false);
                         if (video != null) videos.add(video.toYouTubeV3Json());
                     }
                     return protobuf(YouTubeV3Proto.videos(videos));
@@ -775,6 +775,10 @@ public class ProxyServer extends NanoHTTPD {
     }
 
     private VideoData getVideoData(String vid, String quality) {
+        return getVideoData(vid, quality, true);
+    }
+
+    private VideoData getVideoData(String vid, String quality, boolean resolveStream) {
         VideoData v = null;
         boolean invidiousMetadataLoaded = false;
         try {
@@ -797,7 +801,7 @@ public class ProxyServer extends NanoHTTPD {
         // Piped /streams provides metadata as well as stream candidates. Use it
         // when Invidious is unavailable or did not supply a usable stream.
         boolean pipedMetadataLoaded = false;
-        if (!invidiousMetadataLoaded || v.streamUrl == null || v.streamUrl.isEmpty()) {
+        if (!invidiousMetadataLoaded && (!resolveStream || v.streamUrl == null || v.streamUrl.isEmpty())) {
             try {
                 JsonObject data = piped.streams(vid);
                 VideoData fromPiped = VideoData.fromPiped(data, vid, quality);
@@ -856,7 +860,7 @@ public class ProxyServer extends NanoHTTPD {
         // InnerTube is the final metadata/stream fallback, or fills a missing
         // playable stream after a metadata-only provider response.
         if ((!invidiousMetadataLoaded && !pipedMetadataLoaded && !legacyMetadataLoaded)
-                || v.streamUrl == null || v.streamUrl.isEmpty()) {
+                || (resolveStream && (v.streamUrl == null || v.streamUrl.isEmpty()))) {
             try {
                 VideoData modern = VideoData.fromInnerTube(innerTube.player(vid), quality);
                 if (modern != null) {
@@ -891,7 +895,7 @@ public class ProxyServer extends NanoHTTPD {
 
         // Resolve only a supplied channel identifier. Do not make a network
         // request using the uploader's display name when channelId is absent.
-        if (v.channelId != null && !v.channelId.isEmpty()
+        if (resolveStream && v.channelId != null && !v.channelId.isEmpty()
                 && (!v.channelId.startsWith("UC") || v.channelId.length() != 24)
                 && invidious.getHealthyCount() > 0) {
             try {
@@ -908,7 +912,7 @@ public class ProxyServer extends NanoHTTPD {
             } catch (Exception e) {
                 Log.w(TAG, "Invidious channel-id resolution failed: " + e.getMessage());
             }
-        } else if (v.channelId != null && !v.channelId.isEmpty()
+        } else if (resolveStream && v.channelId != null && !v.channelId.isEmpty()
                 && (!v.channelId.startsWith("UC") || v.channelId.length() != 24)
                 && invidious.getHealthyCount() == 0) {
             try {
