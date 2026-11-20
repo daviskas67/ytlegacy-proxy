@@ -68,9 +68,45 @@ public class YouTubeV3ProtoTest {
         List<Field> item = fields(requireField(response, 1007, 2).payload);
         assertEquals(videoId, text(requireField(item, 101, 2)));
         List<Field> snippet = fields(requireField(item, 2, 2).payload);
-        assertEquals(videoId, text(requireField(snippet, 3, 2)));
-        assertEquals("YouTube", text(requireField(snippet, 6, 2)));
+        assertEquals(videoId, text(requireField(snippet, 4, 2)));
+        assertEquals("YouTube", text(requireField(snippet, 7, 2)));
+        assertNotNull("the status message must exist", findField(item, 4));
+        assertNotNull("the statistics message must exist", findField(item, 5));
         assertNull(VideoData.feedPlaceholder("invalid"));
+    }
+
+    @Test
+    public void videosUseLegacyClientResourceFieldsAndVarintStatistics() {
+        JsonObject video = new JsonObject();
+        video.addProperty("videoId", "abcdefghijk");
+        video.addProperty("title", "Video title");
+        video.addProperty("description", "Video description");
+        video.addProperty("author", "Channel name");
+        video.addProperty("published", "2026-11-20T12:00:00.000Z");
+        video.addProperty("lengthSeconds", 123);
+        video.addProperty("viewCount", 987654L);
+        video.addProperty("likeCount", 1234L);
+
+        List<JsonObject> source = new ArrayList<JsonObject>();
+        source.add(video);
+        List<Field> response = fields(YouTubeV3Proto.videos(source));
+        List<Field> item = fields(requireField(response, 1007, 2).payload);
+
+        List<Field> snippet = fields(requireField(item, 2, 2).payload);
+        assertEquals("2026-11-20T12:00:00.000Z", text(requireField(snippet, 1, 2)));
+        assertEquals("Video title", text(requireField(snippet, 4, 2)));
+        assertEquals("Video description", text(requireField(snippet, 5, 2)));
+        assertEquals("Channel name", text(requireField(snippet, 7, 2)));
+
+        List<Field> contentDetails = fields(requireField(item, 3, 2).payload);
+        assertEquals("PT123S", text(requireField(contentDetails, 1, 2)));
+
+        // Client Video.d() is status (bp); Video.e() is statistics (bo).
+        assertEquals("status message is present", 0,
+            fields(requireField(item, 4, 2).payload).size());
+        List<Field> statistics = fields(requireField(item, 5, 2).payload);
+        assertEquals(987654L, requireField(statistics, 1, 0).scalar);
+        assertEquals(1234L, requireField(statistics, 2, 0).scalar);
     }
 
     private static final class Field {
