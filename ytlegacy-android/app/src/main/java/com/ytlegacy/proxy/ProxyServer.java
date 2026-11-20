@@ -762,7 +762,8 @@ public class ProxyServer extends NanoHTTPD {
                 if (vid == null) vid = session.getParms().get("v");
                 Log.i(TAG, "LEGACY_STREAM: " + uri + " params=" + session.getParms());
                 if (vid != null && VIDEO_ID.matcher(vid).matches()) {
-                    Response invidiousStream = tryInvidiousStream(vid, session);
+                    String requestedQuality = getRequestedQuality(session);
+                    Response invidiousStream = tryInvidiousStream(vid, session, requestedQuality);
                     if (invidiousStream != null) return invidiousStream;
                     if (invidious.getHealthyCount() == 0) {
                         java.net.HttpURLConnection yc = yt2009.tryStream(vid, session);
@@ -772,8 +773,9 @@ public class ProxyServer extends NanoHTTPD {
                         }
                     }
                     Log.w(TAG, "Legacy stream unavailable from Invidious/yt2009; trying InnerTube");
-                    Response modernStream = tryInnerTubeStream(vid, session);
-                    if (modernStream != null) return modernStream;                } else {
+                    Response modernStream = tryInnerTubeStream(vid, session, requestedQuality);
+                    if (modernStream != null) return modernStream;
+                } else {
                     Log.w(TAG, "LEGACY_STREAM: no video_id in params");
                 }
                 byte[] emptyMp4 = (EMPTY_MP4 != null) ? EMPTY_MP4 : new byte[]{
