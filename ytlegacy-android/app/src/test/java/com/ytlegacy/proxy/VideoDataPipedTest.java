@@ -71,5 +71,6 @@ public class VideoDataPipedTest {
         assertNotNull(video);
         assertEquals("Metadata only", video.title);
         assertEquals("", video.streamUrl);
+        assertEquals("", video.toYouTubeV3Json().get("authorId").getAsString());
     }
 }
