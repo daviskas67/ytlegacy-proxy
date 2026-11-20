@@ -1387,20 +1387,22 @@ public class ProxyServer extends NanoHTTPD {
         }
     }
 
-    private static String emptyFeed(String t) {
+    private static String emptyFeed(String type) {
+        String safeType = xmlEscape(type);
+        String encodedType = urlEncode(type);
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
             "<feed xmlns=\"http://www.w3.org/2005/Atom\" " +
             "xmlns:gd=\"http://schemas.google.com/g/2005\" " +
             "xmlns:yt=\"http://gdata.youtube.com/schemas/2007\" " +
             "xmlns:media=\"http://search.yahoo.com/mrss/\" " +
             "xmlns:openSearch=\"http://a9.com/-/spec/opensearch/1.1/\">\n" +
-            "  <id>tag:youtube.com,2008:feed:" + t + "</id>\n" +
-            "  <title type=\"text\">" + t + "</title>\n" +
+            "  <id>tag:youtube.com,2008:feed:" + safeType + "</id>\n" +
+            "  <title type=\"text\">" + safeType + "</title>\n" +
             "  <updated>2013-08-07T00:00:00.000Z</updated>\n" +
             "  <openSearch:totalResults>0</openSearch:totalResults>\n" +
             "  <openSearch:startIndex>1</openSearch:startIndex>\n" +
             "  <openSearch:itemsPerPage>25</openSearch:itemsPerPage>\n" +
-            "  <link rel=\"self\" type=\"application/atom+xml\" href=\"http://127.0.0.1:8080/feeds/api/" + t + "\" />\n" +
+            "  <link rel=\"self\" type=\"application/atom+xml\" href=\"" + LOCAL_BASE + "/feeds/api/" + encodedType + "\" />\n" +
             "</feed>";
     }
 
