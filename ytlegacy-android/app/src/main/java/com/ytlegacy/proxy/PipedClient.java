@@ -259,7 +259,10 @@ public final class PipedClient {
                 return result;
             }
             if (status == 0 || status == 429 || status >= 500 || status == 200) {
-                markFailed(server, "HTTP " + status + " for " + path);
+                String reason = status == 200
+                    ? "HTTP 200 body read/JSON parse failed for " + path
+                    : "HTTP " + status + " for " + path;
+                markFailed(server, reason);
             } else {
                 markResponsive(server, latency);
                 Log.w(TAG, server.base + " returned HTTP " + status + " for " + path);
