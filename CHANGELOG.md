@@ -13,7 +13,8 @@ All notable changes recorded here are for the releases updated during the curren
 ### Security and compatibility notes
 - The app does not capture browser traffic or extract Google authorization tokens. The manual upstream `oauth2_4` step remains part of yt2009's gsign flow.
 - Google account passwords should only be entered on Google's `accounts.google.com` page. The upstream token handoff to the selected yt2009 instance still uses plain HTTP.
-- The Android debug APK must pass GitHub Actions before this release is published. No physical-device login test is claimed.
+- The Android debug APK built successfully in GitHub Actions for commit `efa6ce20975a2030623b60caaf96470c2ba29c25` (run `44711183134`); artifact `ytlegacy-proxy-v1.13-debug` was uploaded.
+- No physical-device login test is claimed. The upstream gsign manual step still needs to be completed on the target device/browser.
 
 ## [1.12] - 2026-11-20
 
