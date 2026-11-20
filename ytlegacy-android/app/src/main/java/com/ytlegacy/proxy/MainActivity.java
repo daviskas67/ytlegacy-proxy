@@ -37,6 +37,7 @@ public class MainActivity extends Activity {
     private boolean loginPollActive = false;
     private boolean activityResumed = false;
     private boolean loginCompletionDialogShown = false;
+    private boolean pickerOpened = false;
     private int loginPollAttempts = 0;
     private static final long LOGIN_POLL_INTERVAL_MS = 5000L;
     private static final int LOGIN_POLL_LIMIT = 180;
@@ -56,7 +57,10 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         activityResumed = true;
-        if (loginPollActive) {
+        if (pickerOpened) {
+            pickerOpened = false;
+            restoreLoginState();
+        } else if (loginPollActive) {
             loginHandler.removeCallbacks(loginPollRunnable);
             loginHandler.post(loginPollRunnable);
         } else if (lastDeviceCode.length() == 0 && isServiceRunning()) {
@@ -156,7 +160,7 @@ public class MainActivity extends Activity {
         layout.addView(accountStatus, accountStatusParams);
 
         Button loginButton = new Button(this);
-        loginButton.setText("Start Google account sign-in");
+        loginButton.setText("Connect Google account");
         loginButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
                 startGoogleLogin();
@@ -165,7 +169,7 @@ public class MainActivity extends Activity {
         addButton(layout, loginButton, density);
 
         Button checkButton = new Button(this);
-        checkButton.setText("Check sign-in status");
+        checkButton.setText("I finished sign-in — check now");
         checkButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
                 checkGoogleLogin(false);
@@ -174,7 +178,7 @@ public class MainActivity extends Activity {
         addButton(layout, checkButton, density);
 
         Button pickerButton = new Button(this);
-        pickerButton.setText("Select YouTube channel");
+        pickerButton.setText("Choose / change YouTube channel");
         pickerButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
                 checkGoogleLogin(true);
@@ -237,23 +241,42 @@ public class MainActivity extends Activity {
         String message = "On a PC, open:\n" + desktopUrl
             + "\n\nEnter this device code:\n" + code
             + "\n\nFollow the sign-in steps shown by yt2009. Keep this app open: it checks the account automatically every five seconds. When yt2009 confirms the account, the app will offer to open the YouTube channel picker.";
+        message += "\\n\\nThe app will detect when the account is linked and then offer the channel picker.";
         new AlertDialog.Builder(this)
-            .setTitle("yt2009 Google sign-in")
+            .setTitle("Step 1 of 2 · Start sign-in")
             .setMessage(message)
-            .setPositiveButton("Copy device code", new DialogInterface.OnClickListener() {
+            .setPositiveButton("Share setup instructions", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    shareSetupInstructions(code, desktopUrl);
+                }
+            })
+            .setNeutralButton("Copy device code", new DialogInterface.OnClickListener() {
                 @Override public void onClick(DialogInterface dialog, int which) {
                     copyText(code);
                     Toast.makeText(MainActivity.this, "Device code copied", Toast.LENGTH_SHORT).show();
                 }
             })
-            .setNeutralButton("Copy PC URL", new DialogInterface.OnClickListener() {
-                @Override public void onClick(DialogInterface dialog, int which) {
-                    copyText(desktopUrl);
-                    Toast.makeText(MainActivity.this, "URL copied", Toast.LENGTH_SHORT).show();
-                }
-            })
             .setNegativeButton("Close", null)
             .show();
+    }
+
+    private void shareSetupInstructions(String code, String desktopUrl) {
+        String instructions = "ytlegacy-proxy — Google account setup\\n\\n"
+            + "1. On your computer, open: " + desktopUrl + "\\n"
+            + "2. Enter this device code: " + code + "\\n"
+            + "3. Complete the steps shown by the yt2009 page.\\n"
+            + "4. Leave ytlegacy-proxy running. It will detect the linked account and offer the YouTube channel picker.\\n\\n"
+            + "Use only the exact yt2009 host shown above. The upstream sign-in page explains its remaining manual step.";
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, "ytlegacy-proxy sign-in instructions");
+        send.putExtra(Intent.EXTRA_TEXT, instructions);
+        try {
+            startActivity(Intent.createChooser(send, "Send setup instructions to your computer"));
+        } catch (Exception e) {
+            copyText(instructions);
+            Toast.makeText(this, "Could not open sharing. Instructions copied instead.", Toast.LENGTH_LONG).show();
+        }
     }
 
     /**
@@ -347,8 +370,13 @@ public class MainActivity extends Activity {
                             lastDeviceCode = result.optString("device", "");
                             lastPickerUrl = result.optString("pickerUrl", "");
                             if (result.optBoolean("authorized", false)) {
-                                accountStatus.setText("Account linked · "
-                                    + result.optInt("accountCount", 0) + " channel(s)");
+                                int selectedCount = result.optInt("selectedCount", 0);
+                                String selectedName = result.optString("selectedAccount", "");
+                                if (selectedCount > 0) {
+                                    accountStatus.setText("Connected · " + selectedName);
+                                } else {
+                                    accountStatus.setText("Account linked · choose a YouTube channel");
+                                }
                             } else if (lastDeviceCode.length() == 7) {
                                 startLoginPolling();
                             } else {
@@ -370,8 +398,10 @@ public class MainActivity extends Activity {
             return;
         }
         try {
+            pickerOpened = true;
             startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(picker)));
         } catch (Exception e) {
+            pickerOpened = false;
             showMessage("Channel picker", "Could not open browser: " + e.getMessage());
         }
     }
@@ -390,10 +420,12 @@ public class MainActivity extends Activity {
                         @Override public void run() {
                             boolean authorized = result.optBoolean("authorized", false);
                             int count = result.optInt("accountCount", 0);
+                            int selectedCount = result.optInt("selectedCount", 0);
                             String selected = result.optString("selectedAccount", "");
                             if (authorized) {
-                                String label = "Account linked · " + count + " channel(s)";
-                                if (selected.length() > 0) label += " · selected: " + selected;
+                                String label = selectedCount > 0
+                                    ? "Connected · " + selected
+                                    : "Account linked · " + count + " channel(s) · choose one";
                                 accountStatus.setText(label);
                                 if (openPicker) {
                                     openChannelPicker(result);
