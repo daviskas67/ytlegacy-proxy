@@ -3,7 +3,7 @@ set -e
 
 PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SDK="/usr/lib/android-sdk"
-BT="$SDK/build-tools/29.0.3"
+BT="$SDK/build-tools/30.0.3"
 PLATFORM="$SDK/platforms/android-30"
 ANDROID_JAR="$PLATFORM/android.jar"
 D8_JAR="${D8_JAR:-$BT/lib/d8.jar}"
