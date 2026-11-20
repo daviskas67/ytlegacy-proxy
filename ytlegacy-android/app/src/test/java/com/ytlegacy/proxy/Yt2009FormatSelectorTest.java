@@ -56,6 +56,38 @@ public class Yt2009FormatSelectorTest {
         assertNull(Yt2009FormatSelector.select(formats, "720p"));
     }
 
+    @Test
+    public void internalFmtMapHostMapsToTheInstanceThatAnsweredMetadata() {
+        String rewritten = Yt2009FormatSelector.normalizeFormatUrl(
+            "http://68.172.220.11:730/videoplayback?video_id=abcdefghijk&itag=18",
+            "https://community-yt2009.example"
+        );
+        assertEquals(
+            "https://community-yt2009.example/videoplayback?video_id=abcdefghijk&itag=18",
+            rewritten
+        );
+    }
+
+    @Test
+    public void internalFmtMapHostNeverGetsPinnedToOneNamedInstance() {
+        String rewritten = Yt2009FormatSelector.normalizeFormatUrl(
+            "http://68.172.220.11:730/get_video?video_id=abcdefghijk",
+            "https://another-community-instance.example"
+        );
+        assertTrue(rewritten.startsWith("https://another-community-instance.example/"));
+        assertTrue(!rewritten.contains("femboy.email"));
+    }
+
+    @Test
+    public void yt2009FormatPathKeepsTheQueryStringForPoolFailover() {
+        assertEquals(
+            "/videoplayback?video_id=abcdefghijk&itag=22",
+            Yt2009FormatSelector.pathAndQuery(
+                "https://community-yt2009.example/videoplayback?video_id=abcdefghijk&itag=22"
+            )
+        );
+    }
+
     private static Map<Integer, String> formats() {
         Map<Integer, String> formats = new HashMap<Integer, String>();
         formats.put(18, "https://r.googlevideo.com/itag18");
