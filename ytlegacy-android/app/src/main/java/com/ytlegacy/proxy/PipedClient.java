@@ -159,6 +159,13 @@ public final class PipedClient {
         return normalizeVideos(result);
     }
 
+    /** Fetches unauthenticated stream metadata through the healthy Piped instance pool. */
+    public JsonObject streams(String videoId) {
+        if (!validVideoId(videoId)) return null;
+        JsonElement result = getJson("/streams/" + encode(videoId));
+        return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
+    }
+
     public JsonArray search(String query) {
         String q = query == null ? "" : query;
         JsonElement result = getJson("/search?q=" + encode(q) + "&filter=videos");
