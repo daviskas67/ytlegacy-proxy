@@ -98,6 +98,8 @@ apktool d -f "$WORK/unsigned.apk" -o "$WORK/verify" >/dev/null
 grep -q 'package="org.ytlegacy.daviskas"' "$WORK/verify/AndroidManifest.xml"
 grep -q 'Shell\$HomeActivity' "$WORK/verify/AndroidManifest.xml"
 grep -q 'com.ytlegacy.proxy.ProxyService' "$WORK/verify/AndroidManifest.xml"
+grep -q 'android.permission.FOREGROUND_SERVICE' "$WORK/verify/AndroidManifest.xml"
+grep -q 'foregroundServiceType="dataSync"' "$WORK/verify/AndroidManifest.xml"
 grep -q 'com.ytlegacy.proxy.MainActivity' "$WORK/verify/res/xml/youtube_preferences.xml"
 grep -q 'ytlegacy_proxy_settings' "$WORK/verify/res/xml/youtube_preferences.xml"
 grep -q 'Lcom/ytlegacy/proxy/ProxyService;' "$WORK/verify/smali/org/ytlegacy/daviskas/core/BaseApplication.smali"
