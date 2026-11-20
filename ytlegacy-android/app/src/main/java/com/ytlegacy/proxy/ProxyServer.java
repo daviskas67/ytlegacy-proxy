@@ -166,10 +166,11 @@ public class ProxyServer extends NanoHTTPD {
                 if (uri.startsWith("/youtube/v3/videos")) {
                     java.util.List<JsonObject> videos = new java.util.ArrayList<JsonObject>();
                     java.util.List<String> ids = YouTubeV3Proto.parseIds(session.getParms().get("id"), 50);
+                    String quality = PlaybackSettings.getQuality(applicationContext);
                     for (String id : ids) {
                         if (!VIDEO_ID.matcher(id).matches()) continue;
-                        JsonObject video = invidious.video(id);
-                        if (video != null) videos.add(video);
+                        VideoData video = getVideoData(id, quality);
+                        if (video != null) videos.add(video.toYouTubeV3Json());
                     }
                     return protobuf(YouTubeV3Proto.videos(videos));
                 }
@@ -793,8 +794,49 @@ public class ProxyServer extends NanoHTTPD {
             v.id = vid;
         }
 
+        // Piped /streams provides metadata as well as stream candidates. Use it
+        // when Invidious is unavailable or did not supply a usable stream.
+        boolean pipedMetadataLoaded = false;
+        if (!invidiousMetadataLoaded || v.streamUrl == null || v.streamUrl.isEmpty()) {
+            try {
+                JsonObject data = piped.streams(vid);
+                VideoData fromPiped = VideoData.fromPiped(data, vid, quality);
+                if (fromPiped != null) {
+                    pipedMetadataLoaded = true;
+                    if (v.title == null || v.title.isEmpty() || v.title.equals(vid))
+                        v.title = fromPiped.title;
+                    if (v.author == null || v.author.isEmpty() || "YouTube".equals(v.author))
+                        v.author = fromPiped.author;
+                    if (v.channelId == null || v.channelId.isEmpty())
+                        v.channelId = fromPiped.channelId;
+                    if (v.description == null || v.description.isEmpty())
+                        v.description = fromPiped.description;
+                    if (v.lengthSeconds <= 0) v.lengthSeconds = fromPiped.lengthSeconds;
+                    if (v.viewCount <= 0) v.viewCount = fromPiped.viewCount;
+                    if (v.likeCount <= 0) v.likeCount = fromPiped.likeCount;
+                    if (v.published == null || v.published.startsWith("2013-")) {
+                        v.published = fromPiped.published;
+                        v.uploadDate = fromPiped.uploadDate;
+                    }
+                    v.isLive = v.isLive || fromPiped.isLive;
+                    if ((v.streamUrl == null || v.streamUrl.isEmpty())
+                            && fromPiped.streamUrl != null && !fromPiped.streamUrl.isEmpty()) {
+                        v.streamUrl = fromPiped.streamUrl;
+                        v.itag = fromPiped.itag;
+                        v.mimeType = fromPiped.mimeType;
+                        v.width = fromPiped.width;
+                        v.height = fromPiped.height;
+                        v.isHd = fromPiped.isHd;
+                    }
+                    Log.i(TAG, "getVideoData: Piped metadata OK for " + vid);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "getVideoData: Piped lookup failed: " + e.getMessage());
+            }
+        }
+
         boolean legacyMetadataLoaded = false;
-        if (!invidiousMetadataLoaded && invidious.getHealthyCount() == 0) {
+        if (!invidiousMetadataLoaded && !pipedMetadataLoaded) {
             try {
                 Yt2009Client.Info info = yt2009.getVideoInfo(vid);
                 if ("ok".equals(info.status)) {
@@ -811,25 +853,26 @@ public class ProxyServer extends NanoHTTPD {
             }
         }
 
-        // Ask InnerTube for a stream when Invidious metadata is valid but
-        // has no complete progressive MP4, or when yt2009 supplied metadata only.
-        if ((!invidiousMetadataLoaded && !legacyMetadataLoaded)
+        // InnerTube is the final metadata/stream fallback, or fills a missing
+        // playable stream after a metadata-only provider response.
+        if ((!invidiousMetadataLoaded && !pipedMetadataLoaded && !legacyMetadataLoaded)
                 || v.streamUrl == null || v.streamUrl.isEmpty()) {
             try {
                 VideoData modern = VideoData.fromInnerTube(innerTube.player(vid), quality);
                 if (modern != null) {
-                    if (v.title.isEmpty()) v.title = modern.title;
-                    if (v.author.isEmpty()) v.author = modern.author;
-                    if (v.channelId.isEmpty()) v.channelId = modern.channelId;
+                    if (v.title == null || v.title.isEmpty() || v.title.equals(vid)) v.title = modern.title;
+                    if (v.author == null || v.author.isEmpty() || "YouTube".equals(v.author))
+                        v.author = modern.author;
+                    if (v.channelId == null || v.channelId.isEmpty()) v.channelId = modern.channelId;
                     if (v.lengthSeconds <= 0) v.lengthSeconds = modern.lengthSeconds;
                     if (v.viewCount <= 0) v.viewCount = modern.viewCount;
-                    if (v.description.isEmpty()) v.description = modern.description;
+                    if (v.description == null || v.description.isEmpty()) v.description = modern.description;
                     if (v.published == null || v.published.startsWith("2013-")) {
                         v.published = modern.published;
                         v.uploadDate = modern.uploadDate;
                     }
                     if (modern.likeCount > 0) v.likeCount = modern.likeCount;
-                    v.isLive = modern.isLive;
+                    v.isLive = v.isLive || modern.isLive;
                     if ((v.streamUrl == null || v.streamUrl.isEmpty())
                             && modern.streamUrl != null && !modern.streamUrl.isEmpty()) {
                         v.streamUrl = modern.streamUrl;
@@ -846,10 +889,10 @@ public class ProxyServer extends NanoHTTPD {
             }
         }
 
-        if (v.channelId == null || v.channelId.isEmpty())
-            v.channelId = (v.author != null && !v.author.isEmpty()) ? v.author : "";
-
-        if (!v.channelId.isEmpty() && (!v.channelId.startsWith("UC") || v.channelId.length() != 24)
+        // Resolve only a supplied channel identifier. Do not make a network
+        // request using the uploader's display name when channelId is absent.
+        if (v.channelId != null && !v.channelId.isEmpty()
+                && (!v.channelId.startsWith("UC") || v.channelId.length() != 24)
                 && invidious.getHealthyCount() > 0) {
             try {
                 JsonArray channels = invidious.searchChannels(v.author);
@@ -865,7 +908,7 @@ public class ProxyServer extends NanoHTTPD {
             } catch (Exception e) {
                 Log.w(TAG, "Invidious channel-id resolution failed: " + e.getMessage());
             }
-        } else if (!v.channelId.isEmpty()
+        } else if (v.channelId != null && !v.channelId.isEmpty()
                 && (!v.channelId.startsWith("UC") || v.channelId.length() != 24)
                 && invidious.getHealthyCount() == 0) {
             try {
