@@ -1292,10 +1292,14 @@ public class ProxyServer extends NanoHTTPD {
     }
 
     private boolean isTrustedVideoUrl(java.net.URL url, String pipedProxyUrl) {
-        if (url == null || !"https".equalsIgnoreCase(url.getProtocol())) return false;
-        if (url.getUserInfo() != null || (url.getPort() != -1 && url.getPort() != 443)) return false;
-        String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
-        boolean googleVideo = host.equals("googlevideo.com") || host.endsWith(".googlevideo.com");
+        if (url == null || !"https".equalsIgnoreCase(url.getProtocol())
+                || url.getUserInfo() != null || url.getHost() == null) return false;
+        String host = url.getHost().toLowerCase(java.util.Locale.US);
+        int port = url.getPort() < 0 ? url.getDefaultPort() : url.getPort();
+        boolean googleVideo = port == 443
+            && (host.equals("googlevideo.com") || host.endsWith(".googlevideo.com"));
+        // Invidious and Piped pools may use a configured non-default HTTPS port.
+        // Their own exact-origin checks are the authority for those URLs.
         return googleVideo || invidious.isTrustedStreamUrl(url.toString())
             || PipedStreamSelector.isTrustedStreamUrl(pipedProxyUrl, url.toString());
     }
