@@ -340,8 +340,7 @@ public class Yt2009Client {
                     continue;
                 }
 
-                connection.setConnectTimeout(3000);
-                connection.setReadTimeout(60000);
+                // openWithFailover() already connected and applied its bounded timeouts.
                 int code = connection.getResponseCode();
                 Log.i(TAG, "tryStream " + path + " -> HTTP " + code);
 
