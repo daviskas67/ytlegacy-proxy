@@ -1,0 +1,57 @@
+# Changelog
+
+All notable changes recorded here are for the releases updated during the current maintenance work. Dates use YYYY-MM-DD.
+
+## [1.9] - 2026-11-20
+
+### Added
+- Added `YouTubeV3Proto`, a small protobuf wire-format encoder for the subset of YouTube Data API v3 consumed by the legacy YouTube 5.0.21 client.
+- Implemented a protobuf response for `GET /youtube/v3/activities`. The proxy converts Invidious trending videos into upload-style activity records and respects `maxResults` with a limit of 1–50.
+- Implemented protobuf responses for `GET /youtube/v3/videos` and `GET /youtube/v3/channels`. Requested IDs are resolved through Invidious and returned as legacy-compatible item records.
+- Added a shared response helper that sends protobuf bytes with the `application/x-protobuf` content type.
+
+### Changed
+- Set Android `versionName` to `1.9` and `versionCode` to `6`.
+- Changed the launcher label from `ytlegacy-proxy 1.7` to `ytlegacy-proxy`; the app name no longer contains a release number.
+- Updated the GitHub Actions artifact name to `ytlegacy-proxy-v1.9-debug`.
+- Added a GitHub Actions release step for the `v1.9` tag/release. It publishes the APK as `ytlegacy-proxy-v1.9.apk`.
+- Updated the README release links and v1.9 notes.
+
+### Compatibility notes
+- The `/youtube/v3/players` route still returns an empty protobuf body; player data is handled by the existing legacy player/feed routes.
+- This is a targeted protobuf implementation for the old client's observed requests, not a complete implementation of the YouTube Data API v3.
+
+### Verification status
+- The Android debug APK build completed successfully in GitHub Actions.
+- The GitHub Release `v1.9` was published with the APK attached.
+- Protobuf feed rendering has not been confirmed on the physical device. Treat the v3 feed support as best-effort until the client is tested against it.
+
+## [1.8] - 2026-11-19
+
+### Added
+- Added a public discovery fallback for logged-out requests to `/feeds/api/users/default/subscriptions` and `/feeds/api/users/default/activity`.
+- The default discovery feed first uses Invidious trending videos. If no Invidious instance is healthy, it tries the yt2009 `most_popular` feed, then InnerTube's trending browse feed.
+- Added a locally generated neutral profile silhouette for missing channel avatars and the `/avatar_wait` placeholder route.
+
+### Changed
+- Channel avatars are now fetched from real channel thumbnail URLs supplied by Invidious, trying available image sizes instead of relying on a single image URL.
+- Added alternate Google-host image URL attempts for channel images when the original CDN host fails.
+- Channel avatar fallback uses the yt2009 channel profile when available, then the neutral silhouette.
+- Removed unrelated Rick Astley video thumbnails as generic avatar/image fallbacks. A missing avatar no longer silently becomes a thumbnail for an unrelated video.
+- Changed channel stubs to request the real local `/channel_avatar/{channelId}` endpoint.
+- Updated the proxy-reported version to `1.8`, Android `versionName` to `1.8`, and `versionCode` to `5`.
+- Renamed the GitHub Actions debug artifact to `ytlegacy-proxy-v1.8-debug` and documented the release in the README.
+
+### Fixed
+- Corrected escaping in the channel-image URL extraction regular expression.
+- Protocol-relative image URLs from the yt2009 profile are upgraded to HTTPS before fetching.
+
+### Compatibility notes
+- The legacy `/youtube/v3/activities` endpoint was changed to return an empty protobuf response rather than a JSON placeholder, preventing protobuf parsing from being fed JSON bytes.
+- That v1.8 response was only a compatibility placeholder: it did not contain activity items. Populated protobuf activity/video/channel responses were added as a separate v1.9 change.
+
+---
+
+## Scope
+
+This file documents the v1.8 and v1.9 release changes made during this maintenance pass. Earlier project history (including releases before v1.8) remains in the repository's README and Git history; it is intentionally not reconstructed here as assistant-authored work.
