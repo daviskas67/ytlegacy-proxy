@@ -2,6 +2,18 @@
 
 All notable changes recorded here are for the releases updated during the current maintenance work. Dates use YYYY-MM-DD.
 
+## [1.12] - 2026-11-20
+
+### Added
+- Added automatic polling of the yt2009 account-link status every five seconds for up to 15 minutes after starting gsign.
+- When an account becomes available, the app stops polling and prompts the user to open the YouTube channel picker.
+- Polling pauses while the Activity is backgrounded and resumes when it returns; the current device code and account state are restored from the local proxy after relaunch.
+
+### Security and compatibility notes
+- The user still completes the upstream Google sign-in steps on the yt2009 PC page. The upstream flow requires manually copying its `oauth2_4` value; this release does not intercept browser traffic or automatically extract Google tokens.
+- This is a UX automation layer around yt2009's existing gsign protocol, not a replacement authentication protocol.
+- The Android debug APK must pass GitHub Actions before this release is published. Physical-device sign-in remains unverified.
+
 ## [1.11] - 2026-11-20
 
 ### Added
