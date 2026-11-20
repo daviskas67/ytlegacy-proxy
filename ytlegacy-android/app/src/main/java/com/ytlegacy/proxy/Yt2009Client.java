@@ -474,7 +474,7 @@ public class Yt2009Client {
         connection.setInstanceFollowRedirects(false);
         connection.setUseCaches(false);
         connection.setRequestProperty("User-Agent", BROWSER_UA);
-        connection.setRequestProperty("Referer", BASE + "/");
+        connection.setRequestProperty("Referer", originOf(url) + "/");
         String range = null;
         if (session != null && session.getHeaders() != null)
             range = session.getHeaders().get("range");
