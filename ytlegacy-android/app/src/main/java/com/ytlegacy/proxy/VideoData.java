@@ -171,11 +171,20 @@ public class VideoData {
             }
             applySelectedStream(v, selected);
         }
-        android.util.Log.i("VideoData",
-            "PARSED " + v.id + " itag=" + v.itag + " streamUrl_len=" + v.streamUrl.length()
-            + " mime=" + v.mimeType + " w=" + v.width + " h=" + v.height);
+        logParsedStream(v);
         if (v.height >= 720) v.isHd = true;
         return v;
+    }
+
+    private static void logParsedStream(VideoData video) {
+        try {
+            android.util.Log.i("VideoData",
+                "PARSED " + video.id + " itag=" + video.itag
+                + " streamUrl_len=" + video.streamUrl.length()
+                + " mime=" + video.mimeType + " w=" + video.width + " h=" + video.height);
+        } catch (RuntimeException ignored) {
+            // Android's local-JVM stubs throw; stream parsing must stay testable without a device.
+        }
     }
 
     private static void applySelectedStream(VideoData video, JsonObject selected) {
