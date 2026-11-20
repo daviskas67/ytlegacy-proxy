@@ -105,16 +105,14 @@ public class StreamHttpSupportTest {
     }
 
     @Test
-    public void acceptsOnlySafeFormatHostsForDirectYt2009Urls() throws Exception {
+    public void genericRedirectPolicyAllowsGoogleVideoButNotPinnedYt2009Host() throws Exception {
         assertTrue(StreamHttpSupport.isSafeRedirectTarget(
             new URL("https://r.googlevideo.com/videoplayback")));
-        assertTrue(StreamHttpSupport.isSafeRedirectTarget(
-            new URL("http://femboy.email:730/video/abcdefghijk")));
         assertFalse(StreamHttpSupport.isSafeRedirectTarget(
             new URL("http://googlevideo.com/videoplayback")));
         assertFalse(StreamHttpSupport.isSafeRedirectTarget(
-            new URL("https://example.com/video")));
+            new URL("https://femboy.email:730/video/abcdefghijk")));
         assertFalse(StreamHttpSupport.isSafeRedirectTarget(
-            new URL("http://femboy.email:80/video")));
+            new URL("https://example.com/video")));
     }
 }
