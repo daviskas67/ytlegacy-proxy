@@ -1,107 +1,63 @@
 package com.ytlegacy.proxy;
 
-import com.sun.net.httpserver.HttpServer;
 import org.junit.Test;
 
-import java.io.IOException;
-import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.InetSocketAddress;
 import java.net.URL;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class StreamHttpSupportTest {
 
     @Test
-    public void forwardsByteRangeAndReceivesPartialContent() throws Exception {
-        final AtomicReference<String> receivedRange = new AtomicReference<String>();
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/video", exchange -> {
-            receivedRange.set(exchange.getRequestHeaders().getFirst("Range"));
-            exchange.getResponseHeaders().add("Content-Type", "video/mp4");
-            exchange.getResponseHeaders().add("Accept-Ranges", "bytes");
-            exchange.getResponseHeaders().add("Content-Range", "bytes 5-9/20");
-            byte[] body = new byte[] {5, 6, 7, 8, 9};
-            exchange.sendResponseHeaders(206, body.length);
-            OutputStream output = exchange.getResponseBody();
-            output.write(body);
-            output.close();
-        });
-        server.start();
-
-        HttpURLConnection connection = null;
-        try {
-            URL url = new URL("http://127.0.0.1:" + server.getAddress().getPort() + "/video");
-            connection = (HttpURLConnection) url.openConnection();
-            StreamHttpSupport.applyRangeHeader(connection, "bytes=5-9");
-
-            assertEquals(206, connection.getResponseCode());
-            assertEquals("bytes=5-9", receivedRange.get());
-            assertEquals("bytes 5-9/20", connection.getHeaderField("Content-Range"));
-            assertEquals("bytes", connection.getHeaderField("Accept-Ranges"));
-            assertTrue(StreamHttpSupport.isPartialContent(connection.getResponseCode()));
-            assertTrue(StreamHttpSupport.isSuccessfulStreamStatus(connection.getResponseCode()));
-            assertTrue(StreamHttpSupport.isPlayableContentType(connection.getContentType()));
-            assertEquals(5, connection.getInputStream().readAllBytes().length);
-        } finally {
-            if (connection != null) connection.disconnect();
-            server.stop(0);
-        }
-    }
-
-    @Test
-    public void preservesRangeNotSatisfiableStatusAndContentRange() throws Exception {
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/video", exchange -> {
-            exchange.getResponseHeaders().add("Content-Range", "bytes */20");
-            exchange.getResponseHeaders().add("Accept-Ranges", "bytes");
-            exchange.sendResponseHeaders(416, -1);
-            exchange.close();
-        });
-        server.start();
-
-        HttpURLConnection connection = null;
-        try {
-            URL url = new URL("http://127.0.0.1:" + server.getAddress().getPort() + "/video");
-            connection = (HttpURLConnection) url.openConnection();
-            StreamHttpSupport.applyRangeHeader(connection, "bytes=999-");
-
-            int status = connection.getResponseCode();
-            assertEquals(416, status);
-            assertTrue(StreamHttpSupport.isRangeNotSatisfiable(status));
-            assertEquals("bytes */20", connection.getHeaderField("Content-Range"));
-        } finally {
-            if (connection != null) connection.disconnect();
-            server.stop(0);
-        }
+    public void forwardsValidByteRangeHeader() throws Exception {
+        MockConnection connection = new MockConnection();
+        StreamHttpSupport.applyRangeHeader(connection, "bytes=5-9");
+        assertEquals("bytes=5-9", connection.requestHeaders.get("Range"));
     }
 
     @Test
     public void rejectsMalformedOrUnboundedRangeHeaders() throws Exception {
-        final AtomicReference<String> receivedRange = new AtomicReference<String>();
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/video", exchange -> {
-            receivedRange.set(exchange.getRequestHeaders().getFirst("Range"));
-            exchange.sendResponseHeaders(200, -1);
-            exchange.close();
-        });
-        server.start();
+        MockConnection connection = new MockConnection();
+        StreamHttpSupport.applyRangeHeader(connection, "bytes=0-10\r\nInjected: yes");
+        assertNull(connection.requestHeaders.get("Range"));
+        StreamHttpSupport.applyRangeHeader(connection, "items=0-10");
+        assertNull(connection.requestHeaders.get("Range"));
+        StreamHttpSupport.applyRangeHeader(connection, "bytes=" + repeat("1", 129));
+        assertNull(connection.requestHeaders.get("Range"));
+    }
 
-        HttpURLConnection connection = null;
-        try {
-            URL url = new URL("http://127.0.0.1:" + server.getAddress().getPort() + "/video");
-            connection = (HttpURLConnection) url.openConnection();
-            StreamHttpSupport.applyRangeHeader(connection, "bytes=0-10\r\nInjected: yes");
-            assertEquals(200, connection.getResponseCode());
-            assertEquals(null, receivedRange.get());
-        } finally {
-            if (connection != null) connection.disconnect();
-            server.stop(0);
-        }
+    @Test
+    public void classifiesOkPartialAndUnsatisfiableRangeStatuses() {
+        assertTrue(StreamHttpSupport.isSuccessfulStreamStatus(200));
+        assertTrue(StreamHttpSupport.isSuccessfulStreamStatus(206));
+        assertFalse(StreamHttpSupport.isSuccessfulStreamStatus(416));
+        assertTrue(StreamHttpSupport.isPartialContent(206));
+        assertFalse(StreamHttpSupport.isPartialContent(200));
+        assertTrue(StreamHttpSupport.isRangeNotSatisfiable(416));
+        assertFalse(StreamHttpSupport.isRangeNotSatisfiable(404));
+    }
+
+    @Test
+    public void recognizesPlayableContentTypes() {
+        assertTrue(StreamHttpSupport.isPlayableContentType("video/mp4"));
+        assertTrue(StreamHttpSupport.isPlayableContentType("application/octet-stream"));
+        assertFalse(StreamHttpSupport.isPlayableContentType("text/html"));
+        assertFalse(StreamHttpSupport.isPlayableContentType(null));
+    }
+
+    @Test
+    public void preservesContentRangeHeaderWithFallback() throws Exception {
+        MockConnection connection = new MockConnection();
+        connection.responseHeaders.put("Content-Range", "bytes */20");
+        assertEquals("bytes */20",
+            StreamHttpSupport.responseHeader(connection, "Content-Range", "missing"));
+        assertEquals("bytes", StreamHttpSupport.responseHeader(connection, "Accept-Ranges", "bytes"));
     }
 
     @Test
@@ -114,5 +70,32 @@ public class StreamHttpSupportTest {
             new URL("https://femboy.email:730/video/abcdefghijk")));
         assertFalse(StreamHttpSupport.isSafeRedirectTarget(
             new URL("https://example.com/video")));
+    }
+
+    private static String repeat(String value, int count) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < count; i++) result.append(value);
+        return result.toString();
+    }
+
+    private static final class MockConnection extends HttpURLConnection {
+        final Map<String, String> requestHeaders = new HashMap<String, String>();
+        final Map<String, String> responseHeaders = new HashMap<String, String>();
+
+        MockConnection() throws Exception {
+            super(new URL("http://localhost/test"));
+        }
+
+        @Override public void disconnect() {}
+        @Override public boolean usingProxy() { return false; }
+        @Override public void connect() {}
+
+        @Override public void setRequestProperty(String key, String value) {
+            requestHeaders.put(key, value);
+        }
+
+        @Override public String getHeaderField(String name) {
+            return responseHeaders.get(name);
+        }
     }
 }
