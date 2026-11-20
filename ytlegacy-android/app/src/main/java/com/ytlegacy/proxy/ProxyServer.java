@@ -681,33 +681,7 @@ public class ProxyServer extends NanoHTTPD {
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "VIDEO PROXY: " + vid);
 
-                String requestedQuality = getRequestedQuality(session);
-                Response invidiousStream = tryInvidiousStream(vid, session, requestedQuality);
-                if (invidiousStream != null) return invidiousStream;
-
-                Response pipedStream = tryPipedStream(vid, session, requestedQuality);
-                if (pipedStream != null) return pipedStream;
-
-                java.net.HttpURLConnection yt2009Stream =
-                    yt2009.tryStream(vid, session, requestedQuality);
-                if (yt2009Stream != null) {
-                    Log.i(TAG, "STREAM via yt2009 instance pool fallback OK");
-                    return buildStreamResponse(yt2009Stream);
-                }
-
-                Log.w(TAG, "Invidious/Piped/yt2009 stream unavailable for " + vid
-                    + ", trying InnerTube");
-                Response modernStream = tryInnerTubeStream(vid, session, requestedQuality);
-                if (modernStream != null) return modernStream;
-
-                Log.w(TAG, "All stream sources unavailable for " + vid + ", returning empty MP4");
-                byte[] emptyMp4 = (EMPTY_MP4 != null) ? EMPTY_MP4 : new byte[]{
-                    0,0,0,0x18,'f','t','y','p','i','s','o','m',
-                    0,0,0x02,0x00,'i','s','o','m','i','s','o','2',
-                    'a','v','c','1','m','p','4','1',
-                    0,0,0,0x08,'f','r','e','e',0,0,0,0x00
-                };
-                return emptyMp4Response(emptyMp4, session.getHeaders().get("range"));
+                return servePlayback(vid, session, getRequestedQuality(session));
             }
 
             // === /vi/{id}/{n}.jpg — превью ===
@@ -765,22 +739,7 @@ public class ProxyServer extends NanoHTTPD {
                 if (vid == null) vid = session.getParms().get("v");
                 Log.i(TAG, "LEGACY_STREAM: " + uri + " params=" + session.getParms());
                 if (vid != null && VIDEO_ID.matcher(vid).matches()) {
-                    String requestedQuality = getRequestedQuality(session);
-                    Response invidiousStream = tryInvidiousStream(vid, session, requestedQuality);
-                    if (invidiousStream != null) return invidiousStream;
-
-                    Response pipedStream = tryPipedStream(vid, session, requestedQuality);
-                    if (pipedStream != null) return pipedStream;
-
-                    java.net.HttpURLConnection yt2009Stream =
-                        yt2009.tryStream(vid, session, requestedQuality);
-                    if (yt2009Stream != null) {
-                        Log.i(TAG, "STREAM legacy via yt2009 instance pool fallback OK");
-                        return buildStreamResponse(yt2009Stream);
-                    }
-                    Log.w(TAG, "Legacy stream unavailable from Invidious/Piped/yt2009; trying InnerTube");
-                    Response modernStream = tryInnerTubeStream(vid, session, requestedQuality);
-                    if (modernStream != null) return modernStream;
+                    return servePlayback(vid, session, getRequestedQuality(session));
                 } else {
                     Log.w(TAG, "LEGACY_STREAM: no video_id in params");
                 }
@@ -924,6 +883,69 @@ public class ProxyServer extends NanoHTTPD {
         if (v.channelId == null || v.channelId.isEmpty()) v.channelId = v.author;
         Log.i(TAG, "getVideoData: id=" + v.id + " title='" + v.title + "' ch='" + v.channelId + "'");
         return v;
+    }
+
+    private Response servePlayback(final String videoId,
+                                  final IHTTPSession session,
+                                  final String quality) {
+        SourceManager.Result<Response> result = sourceManager.firstAvailable("playback",
+            playbackSource("invidious", new SourceManager.Fetcher<Response>() {
+                @Override public Response fetch() {
+                    return tryInvidiousStream(videoId, session, quality);
+                }
+            }),
+            playbackSource("piped", new SourceManager.Fetcher<Response>() {
+                @Override public Response fetch() {
+                    return tryPipedStream(videoId, session, quality);
+                }
+            }),
+            playbackSource("yt2009-pool", new SourceManager.Fetcher<Response>() {
+                @Override public Response fetch() {
+                    java.net.HttpURLConnection connection =
+                        yt2009.tryStream(videoId, session, quality);
+                    return connection == null ? null : buildStreamResponse(connection);
+                }
+            }),
+            playbackSource("innertube", new SourceManager.Fetcher<Response>() {
+                @Override public Response fetch() {
+                    return tryInnerTubeStream(videoId, session, quality);
+                }
+            })
+        );
+
+        if (result.isSuccess()) {
+            Log.i(TAG, "Playback selected provider=" + result.source
+                + " attempts=" + result.attempted + " quality=" + quality);
+            return result.value;
+        }
+
+        Log.w(TAG, "All playback providers failed for " + videoId + ": " + result.detail);
+        byte[] emptyMp4 = (EMPTY_MP4 != null) ? EMPTY_MP4 : new byte[]{
+            0,0,0,0x18,'f','t','y','p','i','s','o','m',
+            0,0,0x02,0x00,'i','s','o','m','i','s','o','2',
+            'a','v','c','1','m','p','4','1',
+            0,0,0,0x08,'f','r','e','e',0,0,0,0x00
+        };
+        String range = session == null || session.getHeaders() == null
+            ? null : session.getHeaders().get("range");
+        return emptyMp4Response(emptyMp4, range);
+    }
+
+    private SourceManager.Source<Response> playbackSource(
+            String sourceName, final SourceManager.Fetcher<Response> fetcher) {
+        return SourceManager.Source.<Response>of(sourceName,
+            new SourceManager.Fetcher<Response>() {
+                @Override public Response fetch() throws Exception {
+                    return fetcher.fetch();
+                }
+            },
+            new SourceManager.DataCheck<Response>() {
+                @Override public boolean hasData(Response response) {
+                    if (response == null || response.getStatus() == null) return false;
+                    int status = response.getStatus().getRequestStatus();
+                    return status == 200 || status == 206 || status == 416;
+                }
+            });
     }
 
     private Response tryInvidiousStream(String videoId, IHTTPSession session, String quality) {
