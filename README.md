@@ -227,8 +227,8 @@ Invidious — неофициальный API совместимости. Пуб�
 
 ## English
 
-> 🎉 **ytlegacy-proxy v1.13 is here!**  
-> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13). This release adds one-tap sharing for sign-in instructions and improves selected-channel status handling.
+> **ytlegacy-proxy v1.14 is available.**  
+> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.14). yt2009 account linking is optional; public features work without signing in.
 
 
 ### v1.13
