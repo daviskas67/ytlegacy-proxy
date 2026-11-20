@@ -32,7 +32,7 @@ public class ProxyService extends Service {
         }
 
         try {
-            server = new ProxyServer();
+            server = new ProxyServer(getApplicationContext());
             server.initEmptyMp4(getApplicationContext());
             server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
             serverStarted = true;
@@ -55,7 +55,7 @@ public class ProxyService extends Service {
         if (Build.VERSION.SDK_INT >= 11) {
             // Notification.Builder.build() exists from API 16; API 11-15 use getNotification().
             Notification.Builder builder = new Notification.Builder(this)
-                .setContentTitle("ytlegacy-proxy 1.7")
+                .setContentTitle("ytlegacy-proxy 1.11")
                 .setContentText("Server running on 127.0.0.1:8080")
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setContentIntent(pendingIntent)
