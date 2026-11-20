@@ -322,7 +322,7 @@ public class Yt2009Client {
                 Log.i(TAG, "tryStream " + videoId + " skipped (negative cache)");
                 return null;
             }
-            failedVideos.remove(videoId, failedAt);
+            failedVideos.remove(videoId);
         }
 
         // Prefer progressive MP4; the old client cannot reliably play FLV.
