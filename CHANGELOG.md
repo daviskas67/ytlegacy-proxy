@@ -2,6 +2,19 @@
 
 All notable changes recorded here are for the releases updated during the current maintenance work. Dates use YYYY-MM-DD.
 
+## [1.13] - 2026-11-20
+
+### Added
+- Added one-tap sharing of the yt2009 sign-in URL, device code, and setup checklist from the Android sign-in dialog.
+- Kept a separate copy-device-code action for manual transfer.
+- The app refreshes account status after returning from the upstream channel picker and displays the selected channel.
+- Simplified the sign-in action labels.
+
+### Security and compatibility notes
+- The app does not capture browser traffic or extract Google authorization tokens. The manual upstream `oauth2_4` step remains part of yt2009's gsign flow.
+- Google account passwords should only be entered on Google's `accounts.google.com` page. The upstream token handoff to the selected yt2009 instance still uses plain HTTP.
+- The Android debug APK must pass GitHub Actions before this release is published. No physical-device login test is claimed.
+
 ## [1.12] - 2026-11-20
 
 ### Added
