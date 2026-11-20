@@ -277,7 +277,7 @@ public final class InvidiousClient {
         for (Server server : ordered) {
             synchronized (lock) {
                 // Never send a real request to an unprobed candidate.
-                if (!server.probed || server.deadUntil > System.currentTimeMillis()) continue;
+                if (!server.probed || !server.alive || server.deadUntil > System.currentTimeMillis()) continue;
             }
             long start = System.nanoTime();
             JsonElement result = requestRaw(server.base, path, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
