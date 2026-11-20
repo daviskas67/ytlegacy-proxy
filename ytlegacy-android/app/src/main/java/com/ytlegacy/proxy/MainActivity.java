@@ -12,6 +12,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
+import android.os.Handler;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -32,11 +33,46 @@ public class MainActivity extends Activity {
     private TextView accountStatus;
     private String lastDeviceCode = "";
     private String lastPickerUrl = "";
+    private final Handler loginHandler = new Handler();
+    private boolean loginPollActive = false;
+    private boolean loginCompletionDialogShown = false;
+    private int loginPollAttempts = 0;
+    private static final long LOGIN_POLL_INTERVAL_MS = 5000L;
+    private static final int LOGIN_POLL_LIMIT = 180;
+    private final Runnable loginPollRunnable = new Runnable() {
+        @Override public void run() {
+            pollLoginStatus();
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setupUI();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (loginPollActive) {
+            loginHandler.removeCallbacks(loginPollRunnable);
+            loginHandler.post(loginPollRunnable);
+        } else if (lastDeviceCode.length() == 0 && isServiceRunning()) {
+            restoreLoginState();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        loginHandler.removeCallbacks(loginPollRunnable);
+        super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        loginHandler.removeCallbacks(loginPollRunnable);
+        loginPollActive = false;
+        super.onDestroy();
     }
 
     private void setupUI() {
@@ -177,6 +213,7 @@ public class MainActivity extends Activity {
                             lastPickerUrl = result.optString("pickerUrl", "");
                             accountStatus.setText("Waiting for sign-in · code " + lastDeviceCode);
                             showLoginInstructions(result);
+                            startLoginPolling();
                         }
                     });
                 } catch (final Exception e) {
@@ -216,6 +253,126 @@ public class MainActivity extends Activity {
             .show();
     }
 
+    /**
+     * Polls the yt2009 instance for completion of its own gsign flow.
+     * This never reads browser traffic or extracts Google authorization tokens.
+     */
+    private void startLoginPolling() {
+        loginHandler.removeCallbacks(loginPollRunnable);
+        loginPollActive = true;
+        loginCompletionDialogShown = false;
+        loginPollAttempts = 0;
+        accountStatus.setText("Waiting for sign-in · code " + lastDeviceCode + " · auto-checking");
+        loginHandler.post(loginPollRunnable);
+    }
+
+    private void pollLoginStatus() {
+        if (!loginPollActive || isFinishing()) return;
+        if (!isServiceRunning()) {
+            loginPollActive = false;
+            accountStatus.setText("Proxy stopped · sign-in check paused");
+            return;
+        }
+        loginPollAttempts++;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final JSONObject result = requestLocal("/api/yt2009/login/status", "GET");
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            if (!loginPollActive || isFinishing()) return;
+                            boolean authorized = result.optBoolean("authorized", false);
+                            if (authorized) {
+                                loginPollActive = false;
+                                loginHandler.removeCallbacks(loginPollRunnable);
+                                lastDeviceCode = result.optString("device", lastDeviceCode);
+                                lastPickerUrl = result.optString("pickerUrl", lastPickerUrl);
+                                int count = result.optInt("accountCount", 0);
+                                accountStatus.setText("Account linked · " + count + " channel(s)");
+                                if (!loginCompletionDialogShown) {
+                                    loginCompletionDialogShown = true;
+                                    new AlertDialog.Builder(MainActivity.this)
+                                        .setTitle("Google account linked")
+                                        .setMessage("yt2009 confirmed the account. Open the YouTube channel picker now?")
+                                        .setPositiveButton("Select channel", new DialogInterface.OnClickListener() {
+                                            @Override public void onClick(DialogInterface dialog, int which) {
+                                                openChannelPicker(result);
+                                            }
+                                        })
+                                        .setNegativeButton("Later", null)
+                                        .show();
+                                }
+                                return;
+                            }
+
+                            if (loginPollAttempts >= LOGIN_POLL_LIMIT) {
+                                loginPollActive = false;
+                                accountStatus.setText("Still waiting · tap Check sign-in status");
+                                return;
+                            }
+                            accountStatus.setText("Waiting for Google sign-in · code " + lastDeviceCode
+                                + " · check " + loginPollAttempts + "/" + LOGIN_POLL_LIMIT);
+                            loginHandler.postDelayed(loginPollRunnable, LOGIN_POLL_INTERVAL_MS);
+                        }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            if (!loginPollActive || isFinishing()) return;
+                            if (loginPollAttempts >= LOGIN_POLL_LIMIT) {
+                                loginPollActive = false;
+                                accountStatus.setText("Status unavailable · tap Check sign-in status");
+                            } else {
+                                accountStatus.setText("Waiting for yt2009 · retrying automatically");
+                                loginHandler.postDelayed(loginPollRunnable, LOGIN_POLL_INTERVAL_MS);
+                            }
+                        }
+                    });
+                }
+            }
+        }, "yt2009-login-poll").start();
+    }
+
+    private void restoreLoginState() {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final JSONObject result = requestLocal("/api/yt2009/login/status", "GET");
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            if (isFinishing()) return;
+                            lastDeviceCode = result.optString("device", "");
+                            lastPickerUrl = result.optString("pickerUrl", "");
+                            if (result.optBoolean("authorized", false)) {
+                                accountStatus.setText("Account linked · "
+                                    + result.optInt("accountCount", 0) + " channel(s)");
+                            } else if (lastDeviceCode.length() == 7) {
+                                startLoginPolling();
+                            } else {
+                                accountStatus.setText("Account: not linked");
+                            }
+                        }
+                    });
+                } catch (Exception ignored) {}
+            }
+        }, "yt2009-login-restore").start();
+    }
+
+    private void openChannelPicker(JSONObject result) {
+        String picker = result == null ? lastPickerUrl
+            : result.optString("pickerUrl", lastPickerUrl);
+        if (picker.length() == 0) picker = lastPickerUrl;
+        if (picker.length() == 0) {
+            showMessage("Channel picker", "No account picker URL is available.");
+            return;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(picker)));
+        } catch (Exception e) {
+            showMessage("Channel picker", "Could not open browser: " + e.getMessage());
+        }
+    }
+
     private void checkGoogleLogin(final boolean openPicker) {
         if (!isServiceRunning()) {
             Toast.makeText(this, "Start the proxy first", Toast.LENGTH_SHORT).show();
@@ -236,16 +393,7 @@ public class MainActivity extends Activity {
                                 if (selected.length() > 0) label += " · selected: " + selected;
                                 accountStatus.setText(label);
                                 if (openPicker) {
-                                    String picker = result.optString("pickerUrl", lastPickerUrl);
-                                    if (picker.length() > 0) {
-                                        try {
-                                            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(picker)));
-                                        } catch (Exception e) {
-                                            showMessage("Channel picker", "Could not open browser: " + e.getMessage());
-                                        }
-                                    } else {
-                                        showMessage("Channel picker", "No account picker URL is available.");
-                                    }
+                                    openChannelPicker(result);
                                 } else {
                                     Toast.makeText(MainActivity.this, "yt2009 account found", Toast.LENGTH_SHORT).show();
                                 }
