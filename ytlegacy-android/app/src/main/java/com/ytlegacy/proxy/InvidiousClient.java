@@ -18,6 +18,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Public Invidious API pool. The client probes only instances listed by the
@@ -31,14 +33,62 @@ public final class InvidiousClient {
     private static final long DOWN_TTL_MS = 60000L;
     private static final long PROBE_INTERVAL_MS = 60000L;
 
-    // Official public instances. inv.nadeko.net, NerdVPN, ChocolateMoo and
-    // tiekoetter are present in the current Invidious documentation list.
-    // f5.si is intentionally omitted: its public monitor reported Cloudflare 530.
-    private static final String[] OFFICIAL_INSTANCES = {
+    // These four are currently listed by Invidious documentation.
+    private static final String[] DOCUMENTED_INSTANCES = {
         "https://invidious.nerdvpn.de",
         "https://invidious.tiekoetter.com",
         "https://yt.chocolatemoo53.com",
         "https://inv.nadeko.net"
+    };
+
+    // Community candidates supplied for this project. They are NOT trusted or
+    // endorsed by Invidious. The source list used HTTP URLs; this client tries
+    // HTTPS only and accepts a host only after /api/v1/stats identifies Invidious.
+    private static final String[] COMMUNITY_CANDIDATES = {
+        "https://157.254.18.46:14120",
+        "https://www.invidious.frantisekfiala.eu",
+        "https://37.114.50.170:3000",
+        "https://14.225.212.141:3000",
+        "https://14.224.215.173:3000",
+        "https://71.115.211.25:3067",
+        "https://74.102.17.26:8203",
+        "https://82.67.118.109:3000",
+        "https://41.193.14.3:3000",
+        "https://160.236.192.102:3000",
+        "https://88.210.10.145:3001",
+        "https://213.55.216.127:21388",
+        "https://185.231.102.75:14120",
+        "https://82.69.47.60:31008",
+        "https://invidious.keltechnas.com",
+        "https://videos.nathanle.co",
+        "https://nate-stockhaus.amishcrabs.pics",
+        "https://inv.stappsworld.com",
+        "https://inv.tekforge.de",
+        "https://vid.justanas.xyz",
+        "https://109.66.233.145",
+        "https://60.241.100.198:31008",
+        "https://5.253.247.182:3000",
+        "https://134.195.210.128:9022",
+        "https://you.dwyu.tw",
+        "https://invidious.malooma.bzh",
+        "https://77.168.217.209:3000",
+        "https://yt.tysstech.com",
+        "https://95.182.97.252:8024",
+        "https://inv.violethair.org",
+        "https://youtube.eduardomiguel13.pt",
+        "https://tube.spookyhome.ca",
+        "https://watch.dredgy.au",
+        "https://invidious.culturegremlin.club",
+        "https://invidiousvt.v4l3nt1nvs.ch",
+        "https://inv.dashy.a3x.dn.nyx.im",
+        "https://utube.cyrus-ng.com",
+        "https://yt.easys-web.de",
+        "https://45.158.116.183",
+        "https://invidious.emby11.freeddns.org",
+        "https://tube.tjvl.dev",
+        "https://103.82.192.64:6889",
+        "https://163.61.72.21:3000",
+        "https://yt.khoavo.vndns.net:7601"
     };
 
     private final Object lock = new Object();
@@ -50,9 +100,21 @@ public final class InvidiousClient {
     };
 
     public InvidiousClient() {
-        for (int i = 0; i < OFFICIAL_INSTANCES.length; i++) {
-            servers.add(new Server(OFFICIAL_INSTANCES[i], i));
+        int order = 0;
+        for (String base : DOCUMENTED_INSTANCES) {
+            addCandidate(base, order++);
         }
+        for (String base : COMMUNITY_CANDIDATES) {
+            addCandidate(base, order++);
+        }
+    }
+
+    private void addCandidate(String base, int order) {
+        if (base == null || !base.startsWith("https://")) return;
+        for (Server server : servers) {
+            if (server.base.equalsIgnoreCase(base)) return;
+        }
+        servers.add(new Server(base, order));
     }
 
     public void refreshInBackground() {
@@ -63,11 +125,15 @@ public final class InvidiousClient {
         Thread worker = new Thread(new Runnable() {
             @Override public void run() {
                 final CountDownLatch latch = new CountDownLatch(servers.size());
+                // Do not create one thread per public instance: this can be a
+                // large community pool and many devices are low-memory Androids.
+                ExecutorService executor = Executors.newFixedThreadPool(6);
                 for (final Server server : servers) {
-                    Thread probeThread = new Thread(new Runnable() {
+                    executor.execute(new Runnable() {
                         @Override public void run() {
                             long latency = probe(server.base);
                             synchronized (lock) {
+                                server.probed = true;
                                 if (latency >= 0L) {
                                     server.alive = true;
                                     server.latencyMs = latency;
@@ -83,11 +149,10 @@ public final class InvidiousClient {
                             }
                             latch.countDown();
                         }
-                    }, "invidious-probe");
-                    probeThread.setDaemon(true);
-                    probeThread.start();
+                    });
                 }
-                try { latch.await(8L, TimeUnit.SECONDS); } catch (InterruptedException ignored) {
+                executor.shutdown();
+                try { latch.await(15L, TimeUnit.SECONDS); } catch (InterruptedException ignored) {
                     Thread.currentThread().interrupt();
                 }
                 synchronized (lock) {
@@ -207,7 +272,8 @@ public final class InvidiousClient {
         List<Server> ordered = getOrderedServers();
         for (Server server : ordered) {
             synchronized (lock) {
-                if (server.deadUntil > System.currentTimeMillis()) continue;
+                // Never send a real request to an unprobed candidate.
+                if (!server.probed || server.deadUntil > System.currentTimeMillis()) continue;
             }
             long start = System.nanoTime();
             JsonElement result = requestRaw(server.base, path, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
@@ -238,6 +304,7 @@ public final class InvidiousClient {
 
     private void markResponsive(Server server, long latency) {
         synchronized (lock) {
+            server.probed = true;
             server.alive = true;
             server.failures = 0;
             server.deadUntil = 0L;
@@ -257,6 +324,7 @@ public final class InvidiousClient {
 
     private void markFailed(Server server, String reason) {
         synchronized (lock) {
+            server.probed = true;
             server.failures++;
             server.alive = false;
             long coolDown = server.failures >= 3 ? 300000L : DOWN_TTL_MS;
@@ -396,6 +464,7 @@ public final class InvidiousClient {
         for (Server server : snapshot) {
             JsonObject item = new JsonObject();
             item.addProperty("host", server.base);
+            item.addProperty("probed", server.probed);
             item.addProperty("healthy", server.alive && server.deadUntil <= now);
             item.addProperty("latencyMs", server.latencyMs == Long.MAX_VALUE ? -1L : server.latencyMs);
             item.addProperty("failures", server.failures);
@@ -414,6 +483,7 @@ public final class InvidiousClient {
         volatile long lastSuccess = 0L;
         volatile int failures = 0;
         volatile boolean alive = false;
+        volatile boolean probed = false;
 
         Server(String base, int order) {
             this.base = base;
