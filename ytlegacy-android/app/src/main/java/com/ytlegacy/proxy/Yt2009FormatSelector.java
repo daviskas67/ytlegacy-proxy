@@ -46,6 +46,47 @@ public final class Yt2009FormatSelector {
         return bestBelow != null ? bestBelow : bestAbove;
     }
 
+    /**
+     * Rewrites yt2009's private backend address to the exact instance that
+     * served get_video_info. This deliberately does not pin URLs to one host.
+     */
+    public static String normalizeFormatUrl(String rawUrl, String sourceInstance) {
+        if (rawUrl == null || rawUrl.trim().length() == 0) return "";
+        String value = rawUrl.trim();
+        try {
+            java.net.URL url;
+            if (value.startsWith("//")) value = "https:" + value;
+            if (value.startsWith("/")) {
+                if (sourceInstance == null || sourceInstance.length() == 0) return "";
+                url = new java.net.URL(new java.net.URL(sourceInstance + "/"), value);
+            } else {
+                url = new java.net.URL(value);
+            }
+
+            String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
+            int port = url.getPort() < 0 ? url.getDefaultPort() : url.getPort();
+            if ("68.172.220.11".equals(host) && port == 730) {
+                if (sourceInstance == null || sourceInstance.length() == 0) return "";
+                java.net.URL base = new java.net.URL(sourceInstance);
+                return new java.net.URL(base, url.getFile()).toExternalForm();
+            }
+            return url.toExternalForm();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    public static String pathAndQuery(String rawUrl) {
+        try {
+            java.net.URL url = new java.net.URL(rawUrl);
+            String path = url.getPath();
+            if (path == null || path.length() == 0) path = "/";
+            return url.getQuery() == null ? path : path + "?" + url.getQuery();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     public static int heightForItag(int itag) {
         switch (itag) {
             case 18: return 360; // MP4 H.264 + AAC
