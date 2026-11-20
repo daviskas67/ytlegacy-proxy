@@ -209,7 +209,7 @@ public class FeedXmlBuilder {
     private static String renderVideoEntry(JsonObject vr) {
         try {
             String videoId = getStr(vr, "videoId");
-            if (videoId.isEmpty()) return null;
+            if (!videoId.matches("[A-Za-z0-9_-]{11}")) return null;
 
             String title = vr.has("title") && vr.get("title").isJsonObject()
                 ? getRunsText(vr.getAsJsonObject("title")) : "";
