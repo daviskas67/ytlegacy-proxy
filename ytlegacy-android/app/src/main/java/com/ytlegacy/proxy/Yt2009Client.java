@@ -63,6 +63,52 @@ public class Yt2009Client {
         return c;
     }
 
+    /**
+     * Fetches a personalized account feed only from the explicitly configured
+     * femboy.email instance. Unlike openWithFailover(), this method never sends
+     * the account device identifier to any discovered community instance.
+     */
+    public String fetchAccountFeed(String path, String deviceId) {
+        if (deviceId == null || !deviceId.matches("[A-Za-z0-9]{7}")) {
+            Log.w(TAG, "Personal feed skipped: invalid device id");
+            return null;
+        }
+        HttpURLConnection connection = null;
+        try {
+            String suffix = path == null ? "" : path;
+            if (!suffix.startsWith("/")) suffix = "/" + suffix;
+            URL target = new URL(BASE + suffix);
+            connection = (HttpURLConnection) target.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(7000);
+            connection.setReadTimeout(20000);
+            connection.setUseCaches(false);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("User-Agent",
+                "com.google.android.youtube/5.0.21 (Linux; U; Android 4.4.2; en_US)");
+            connection.setRequestProperty("Accept", "application/atom+xml, application/xml;q=0.9, */*;q=0.8");
+            connection.setRequestProperty("Accept-Language", "en-US,en;q=0.8");
+            connection.setRequestProperty("Referer", BASE + "/");
+            connection.setRequestProperty("X-GData-Device", "device-id=\"" + deviceId + "\"");
+            
+            int status = connection.getResponseCode();
+            if (status != HttpURLConnection.HTTP_OK) {
+                Log.w(TAG, "Personal feed " + suffix + " -> HTTP " + status);
+                return null;
+            }
+            String body = readBody(connection);
+            if (body == null || body.length() == 0) return null;
+            String rewritten = rewriteUrls(body);
+            Log.i(TAG, "Personal yt2009 feed OK (" + rewritten.length() + " chars)");
+            return rewritten;
+        } catch (Exception e) {
+            Log.w(TAG, "Personal yt2009 feed failed: " + e.getMessage());
+            return null;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
     /** Passthrough: тянет текст с yt2009 и переписывает URL на локальные. Возвращает null при ошибке. */
     public String fetchText(String path) {
         for (int attempt = 1; attempt <= 2; attempt++) {
