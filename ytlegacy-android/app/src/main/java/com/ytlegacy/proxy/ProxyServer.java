@@ -803,7 +803,7 @@ public class ProxyServer extends NanoHTTPD {
 
     /** Metadata priority: fastest healthy Invidious, then yt2009 if the whole pool is down. */
     private VideoData getVideoData(String vid) {
-        return getVideoData(vid, null);
+        return getVideoData(vid, PlaybackSettings.getQuality(applicationContext));
     }
 
     private VideoData getVideoData(String vid, String quality) {
