@@ -27,6 +27,7 @@ public class ProxyServer extends NanoHTTPD {
     private final PipedClient piped = new PipedClient();
     private final Yt2009Client yt2009 = new Yt2009Client();
     private final Yt2009AccountManager yt2009Account;
+    private final Context applicationContext;
     private final InnerTubeClient innerTube = new InnerTubeClient();
     private final SourceManager sourceManager = new SourceManager();
     private final AtomicLong requestCount = new AtomicLong();
@@ -48,6 +49,7 @@ public class ProxyServer extends NanoHTTPD {
 
     public ProxyServer(Context context) throws IOException {
         super("127.0.0.1", 8080);
+        applicationContext = context == null ? null : context.getApplicationContext();
         yt2009Account = new Yt2009AccountManager(context);
         // Загружаем список инстансов в фоне, чтобы не блокировать запуск
         new Thread(new Runnable() {
@@ -111,7 +113,7 @@ public class ProxyServer extends NanoHTTPD {
             if (uri.startsWith("/api/video/")) {
                 String vid = stripQuery(uri.substring("/api/video/".length()));
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
-                VideoData v = getVideoData(vid, session.getParms().get("quality"));
+                VideoData v = getVideoData(vid, getRequestedQuality(session));
                 JsonObject result = new JsonObject();
                 result.addProperty("id", v.id);
                 result.addProperty("title", v.title);
@@ -209,7 +211,7 @@ public class ProxyServer extends NanoHTTPD {
                 String vid = stripQuery(uri.substring("/feeds/player/videos/".length()));
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "PLAYER: " + vid);
-                VideoData v = getVideoData(vid, session.getParms().get("quality"));
+                VideoData v = getVideoData(vid, getRequestedQuality(session));
                 Log.i(TAG, "PLAYER built: title='" + v.title + "' ch='" + v.channelId + "'");
                 return xml(GDataXmlBuilder.buildPlayerEntry(v));
             }
@@ -276,7 +278,7 @@ public class ProxyServer extends NanoHTTPD {
                 String vid = stripQuery(uri.substring("/feeds/api/videos/".length()));
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "VIDEO METADATA: " + vid);
-                return xml(GDataXmlBuilder.buildPlayerEntry(getVideoData(vid, session.getParms().get("quality"))));
+                return xml(GDataXmlBuilder.buildPlayerEntry(getVideoData(vid, getRequestedQuality(session))));
             }
 
             // === /feeds/api/videos?q= — ordered provider fallback ===
@@ -668,7 +670,7 @@ public class ProxyServer extends NanoHTTPD {
                 if (vid == null || !VIDEO_ID.matcher(vid).matches())
                     return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "WATCH: " + vid);
-                return xml(GDataXmlBuilder.buildPlayerEntry(getVideoData(vid, session.getParms().get("quality"))));
+                return xml(GDataXmlBuilder.buildPlayerEntry(getVideoData(vid, getRequestedQuality(session))));
             }
 
             // === /video/{id}.mp4 — каскад стрима ===
@@ -679,7 +681,7 @@ public class ProxyServer extends NanoHTTPD {
                 if (!VIDEO_ID.matcher(vid).matches()) return text(Response.Status.BAD_REQUEST, "Bad id");
                 Log.i(TAG, "VIDEO PROXY: " + vid);
 
-                String requestedQuality = session.getParms().get("quality");
+                String requestedQuality = getRequestedQuality(session);
                 Response invidiousStream = tryInvidiousStream(vid, session, requestedQuality);
                 if (invidiousStream != null) return invidiousStream;
 
@@ -1383,6 +1385,12 @@ public class ProxyServer extends NanoHTTPD {
         return q >= 0 ? s.substring(0, q) : s;
     }
 
+    private String getRequestedQuality(IHTTPSession session) {
+        String requested = session == null ? null : session.getParms().get("quality");
+        if (requested != null && requested.trim().length() > 0) return requested.trim();
+        return PlaybackSettings.getQuality(applicationContext);
+    }
+
     private SourceManager.Source<String> videoArrayFeedSource(
             String sourceName, final String feedId, final String title,
             final SourceManager.Fetcher<JsonArray> fetcher) {
@@ -1429,6 +1437,7 @@ public class ProxyServer extends NanoHTTPD {
         String selectedBackend = invidious.getHealthyCount() > 0 ? "invidious"
             : (piped.getHealthyCount() > 0 ? "piped" : "yt2009-fallback");
         status.addProperty("backend", selectedBackend);
+        status.addProperty("playbackQuality", PlaybackSettings.getQuality(applicationContext));
         status.add("invidious", invidious.getStatus());
         status.add("piped", piped.getStatus());
         status.add("sourceRouting", sourceManager.getStatus());
