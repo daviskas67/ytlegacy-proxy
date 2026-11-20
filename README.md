@@ -11,11 +11,16 @@
 
 ## Русский
 
+> 🎉 **ytlegacy-proxy v1.9 уже вышел!**  
+> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9). В этом выпуске прокси получил поддержку protobuf-ответов для нескольких ключевых запросов старого YouTube-клиента, а имя приложения стало просто `ytlegacy-proxy`.
+
+
 ### v1.9
 
 - Добавлены protobuf-ответы для `/youtube/v3/activities`, `/youtube/v3/videos` и `/youtube/v3/channels`, которые запрашивает старый клиент.
-- Лента рекомендаций формируется из популярных роликов Invidious, а карточки дополняются метаданными видео и каналов.
-- Исправлен MIME-тип ответов YouTube Data API v3: клиент получает protobuf вместо JSON-заглушки.
+- Для `/youtube/v3/activities` реализована выдача protobuf-записей на основе Invidious Trending.
+- Для `/youtube/v3/videos` и `/youtube/v3/channels` добавлена выдача protobuf-метаданных по запрошенным ID.
+- Это целевая поддержка используемого старым клиентом подмножества API; отображение ленты рекомендаций на устройстве всё ещё требует отдельной проверки.
 
 ### v1.8
 
@@ -102,7 +107,7 @@ gradle --no-daemon :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.9-debug` (доступен 14 дней) и публикует сборку v1.7 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.7).
+GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.9-debug` (доступен 14 дней) и публикует v1.9 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9).
 
 Дополнительный скрипт `build-manual.sh` рассчитан на окружения, где уже доступны Android SDK tools, D8, Gson 2.2.4 и NanoHTTPD 2.3.1 JAR-файлы.
 
@@ -155,11 +160,16 @@ Invidious — неофициальный API совместимости. Пуб�
 
 ## English
 
+> 🎉 **ytlegacy-proxy v1.9 is here!**  
+> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9). This release adds protobuf responses for key requests made by the legacy YouTube client, and the Android app is now simply named `ytlegacy-proxy`.
+
+
 ### v1.9
 
 - Added protobuf responses for `/youtube/v3/activities`, `/youtube/v3/videos`, and `/youtube/v3/channels`, which are requested by the legacy client.
-- The recommendations feed is populated from Invidious trending videos, with video and channel metadata supplied for feed cards.
-- Corrected the YouTube Data API v3 response MIME type so the client receives protobuf instead of JSON placeholders.
+- Added protobuf activity records for `/youtube/v3/activities`, using Invidious Trending as the source.
+- Added protobuf metadata responses for requested IDs on `/youtube/v3/videos` and `/youtube/v3/channels`.
+- This targets the subset of the API used by the legacy client; actual recommendations-feed rendering on a device still needs verification.
 
 ### v1.8
 
