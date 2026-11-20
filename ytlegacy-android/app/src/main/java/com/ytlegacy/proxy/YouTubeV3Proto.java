@@ -31,10 +31,14 @@ public final class YouTubeV3Proto {
                 // Activity type 1 is an upload; the client filters non-video activity types.
                 snippet.varint(3, 1);
 
+                // The supplied YouTube 5.0.21 client's generated micro-protobuf
+                // parser reads contentDetails.upload and upload.videoId from field
+                // 10101 at both levels. Field 1 is silently skipped by that parser,
+                // leaving the upload object null and crashing the feed adapter.
                 Proto upload = new Proto();
-                upload.string(1, id);
+                upload.string(10101, id);
                 Proto details = new Proto();
-                details.message(1, upload.bytes());
+                details.message(10101, upload.bytes());
 
                 Proto activity = new Proto();
                 activity.message(2, snippet.bytes());
