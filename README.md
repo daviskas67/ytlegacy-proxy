@@ -3,7 +3,7 @@
 **A local compatibility proxy for the legacy YouTube 5.0.21 Android client.**  
 **Локальный прокси совместимости для старого Android-клиента YouTube 5.0.21.**
 
-[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12)
+[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13)
 
 ---
 
@@ -11,9 +11,18 @@
 
 ## Русский
 
-> 🎉 **ytlegacy-proxy v1.12 уже вышел!**  
-> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12). В этом выпуске добавлена автоматическая проверка завершения yt2009 gsign и переход к выбору канала.
+> 🎉 **ytlegacy-proxy v1.13 уже вышел!**  
+> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13). В этом выпуске мастер входа умеет делиться инструкцией и кодом устройства одной кнопкой, а статус выбранного канала обновляется автоматически.
 
+
+### v1.13
+
+- В окне входа добавлена кнопка **Share setup instructions**: она отправляет на компьютер URL yt2009, device code и короткую последовательность действий одним сообщением.
+- Кнопка ручного копирования device code сохранена отдельно.
+- После возврата из выбора канала приложение само обновляет статус и показывает выбранный канал.
+- Названия действий упрощены: **Connect Google account**, **I finished sign-in — check now**, **Choose / change YouTube channel**.
+- Пароль Google вводится только на странице `accounts.google.com`; приложение отдельно предупреждает, что legacy-токен всё ещё передаётся upstream-инстансу по HTTP.
+- Обязательный ручной этап в upstream `gsign` не автоматизирован: приложение не перехватывает браузерный трафик и не извлекает токены.
 
 ### v1.12
 
@@ -146,9 +155,9 @@ gradle --no-daemon :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.12-debug` (доступен 14 дней) и публикует v1.12 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12).
+GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.13-debug` (доступен 14 дней) и публикует v1.13 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
 
-Проверочная сборка v1.11 прошла успешно: [GitHub Actions run #44706719157](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44706719157).
+Проверочная сборка v1.12 прошла успешно: [GitHub Actions run #44710217250](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44710217250).
 
 Дополнительный скрипт `build-manual.sh` рассчитан на окружения, где уже доступны Android SDK tools, D8, Gson 2.2.4 и NanoHTTPD 2.3.1 JAR-файлы.
 
@@ -201,9 +210,18 @@ Invidious — неофициальный API совместимости. Пуб�
 
 ## English
 
-> 🎉 **ytlegacy-proxy v1.12 is here!**  
-> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12). This release adds automatic yt2009 gsign completion checks and a channel-picker prompt.
+> 🎉 **ytlegacy-proxy v1.13 is here!**  
+> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13). This release adds one-tap sharing for sign-in instructions and improves selected-channel status handling.
 
+
+### v1.13
+
+- Added **Share setup instructions** to the sign-in dialog. It shares the yt2009 URL, device code, and a short setup checklist in one message.
+- The separate copy-device-code action remains available.
+- After returning from the channel picker, the app refreshes the account state and displays the selected channel.
+- Simplified action labels to **Connect Google account**, **I finished sign-in — check now**, and **Choose / change YouTube channel**.
+- Google passwords should only be entered on `accounts.google.com`; the app warns that the legacy authorization token is still sent to the upstream instance over HTTP.
+- The upstream `gsign` manual step is not automated: the app does not intercept browser traffic or extract tokens.
 
 ### v1.12
 
@@ -334,9 +352,9 @@ The APK is generated at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.11-debug` artifact (available for 14 days) and publishes the v1.12 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.12).
+GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.11-debug` artifact (available for 14 days) and publishes the v1.13 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
 
-The v1.11 verification build passed: [GitHub Actions run #44706719157](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44706719157).
+The v1.12 verification build passed: [GitHub Actions run #44710217250](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44710217250).
 
 The optional `build-manual.sh` script is intended for environments that already provide Android SDK tools, D8, Gson 2.2.4, and NanoHTTPD 2.3.1 JARs.
 
