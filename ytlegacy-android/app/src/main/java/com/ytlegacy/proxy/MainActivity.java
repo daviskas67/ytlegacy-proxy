@@ -241,7 +241,6 @@ public class MainActivity extends Activity {
         String message = "On a PC, open:\n" + desktopUrl
             + "\n\nEnter this device code:\n" + code
             + "\n\nFollow the sign-in steps shown by yt2009. Keep this app open: it checks the account automatically every five seconds. When yt2009 confirms the account, the app will offer to open the YouTube channel picker.";
-        message += "\\n\\nThe app will detect when the account is linked and then offer the channel picker.";
         new AlertDialog.Builder(this)
             .setTitle("Step 1 of 2 · Start sign-in")
             .setMessage(message)
@@ -261,11 +260,11 @@ public class MainActivity extends Activity {
     }
 
     private void shareSetupInstructions(String code, String desktopUrl) {
-        String instructions = "ytlegacy-proxy — Google account setup\\n\\n"
-            + "1. On your computer, open: " + desktopUrl + "\\n"
-            + "2. Enter this device code: " + code + "\\n"
-            + "3. Complete the steps shown by the yt2009 page.\\n"
-            + "4. Leave ytlegacy-proxy running. It will detect the linked account and offer the YouTube channel picker.\\n\\n"
+        String instructions = "ytlegacy-proxy — Google account setup\n\n"
+            + "1. On your computer, open: " + desktopUrl + "\n"
+            + "2. Enter this device code: " + code + "\n"
+            + "3. Complete the steps shown by the yt2009 page.\n"
+            + "4. Leave ytlegacy-proxy running. It will detect the linked account and offer the YouTube channel picker.\n\n"
             + "Use only the exact yt2009 host shown above. The upstream sign-in page explains its remaining manual step.";
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("text/plain");
@@ -373,7 +372,8 @@ public class MainActivity extends Activity {
                                 int selectedCount = result.optInt("selectedCount", 0);
                                 String selectedName = result.optString("selectedAccount", "");
                                 if (selectedCount > 0) {
-                                    accountStatus.setText("Connected · " + selectedName);
+                                    accountStatus.setText("Connected · "
+                                        + (selectedName.length() > 0 ? selectedName : "channel selected"));
                                 } else {
                                     accountStatus.setText("Account linked · choose a YouTube channel");
                                 }
