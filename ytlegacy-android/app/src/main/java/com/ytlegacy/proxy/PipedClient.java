@@ -387,6 +387,14 @@ public final class PipedClient {
         return status;
     }
 
+    private static String encode(String value) {
+        try {
+            return URLEncoder.encode(value == null ? "" : value, "UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     private static String videoIdFromUrl(String raw) {
         if (raw == null) return "";
         String value = raw.trim();
