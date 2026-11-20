@@ -21,6 +21,7 @@ All notable changes recorded here are for the releases updated during the curren
 - The configured instance URL is plain HTTP. The Google authorization token is submitted directly by the upstream sign-in page to that host and can be intercepted by an observer on the network. Use only when the operator and network are trusted.
 - The proxy sends the account device identifier only to `femboy.email:730`; the generic yt2009 failover path strips `X-GData-Device` and does not forward it to discovered instances.
 - The Android debug APK built successfully in GitHub Actions for commit `72a858f8712dccdb6a4da9c7b3e1e5ad9bcfc594` (run `44706719157`).
+- The v1.11 release workflow publishes the signed debug APK as `ytlegacy-proxy-v1.11.apk`.
 - No physical-device sign-in or personalized-feed test is claimed yet. The upstream sign-in and channel-picker flow must be completed in a browser, then verified on the target Android device.
 
 ## [1.10] - 2026-11-20
