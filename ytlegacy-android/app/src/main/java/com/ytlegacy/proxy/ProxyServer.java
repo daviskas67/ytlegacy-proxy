@@ -28,6 +28,7 @@ public class ProxyServer extends NanoHTTPD {
     private final Yt2009Client yt2009 = new Yt2009Client();
     private final Yt2009AccountManager yt2009Account;
     private final InnerTubeClient innerTube = new InnerTubeClient();
+    private final SourceManager sourceManager = new SourceManager();
     private final AtomicLong requestCount = new AtomicLong();
     private final AtomicLong channelCacheHits = new AtomicLong();
     private final AtomicLong channelCacheMisses = new AtomicLong();
@@ -74,6 +75,7 @@ public class ProxyServer extends NanoHTTPD {
             if ("/health".equals(uri) || "/api/status".equals(uri)) return healthResponse();
             if ("/api/invidious".equals(uri)) return json(invidious.getStatus().toString());
             if ("/api/piped".equals(uri)) return json(piped.getStatus().toString());
+            if ("/api/sources".equals(uri)) return json(sourceManager.getStatus().toString());
             if ("/api/yt2009/login/start".equals(uri)) {
                 if (!"POST".equalsIgnoreCase(session.getMethod().name()))
                     return text(Response.Status.METHOD_NOT_ALLOWED, "Use POST");
@@ -273,39 +275,45 @@ public class ProxyServer extends NanoHTTPD {
                 return xml(GDataXmlBuilder.buildPlayerEntry(getVideoData(vid)));
             }
 
-            // === /feeds/api/videos?q= — Invidious, then Piped, then legacy fallbacks ===
+            // === /feeds/api/videos?q= — ordered provider fallback ===
             if (uri.startsWith("/feeds/api/videos") && !uri.contains("/videos/")) {
-                String query = session.getParms().get("q");
-                if (query == null) query = "";
+                final String query = session.getParms().get("q") == null
+                    ? "" : session.getParms().get("q");
                 Log.i(TAG, "SEARCH: " + query);
 
-                JsonArray videos = invidious.search(query);
-                if (videos != null && videos.size() > 0) {
-                    String feed = FeedXmlBuilder.buildInvidiousFeed(
-                        videos, "search:" + query, "Search results for " + query);
-                    if (feed.contains("<entry")) return xml(feed);
-                }
+                SourceManager.Result<String> primary = sourceManager.firstAvailable("search",
+                    videoArrayFeedSource("invidious", "search:" + query,
+                        "Search results for " + query, new SourceManager.Fetcher<JsonArray>() {
+                            @Override public JsonArray fetch() { return invidious.search(query); }
+                        }),
+                    videoArrayFeedSource("piped", "search:" + query,
+                        "Search results for " + query, new SourceManager.Fetcher<JsonArray>() {
+                            @Override public JsonArray fetch() { return piped.search(query); }
+                        })
+                );
+                if (primary.isSuccess()) return xml(primary.value);
 
-                JsonArray pipedVideos = piped.search(query);
-                if (pipedVideos != null && pipedVideos.size() > 0) {
-                    String feed = FeedXmlBuilder.buildInvidiousFeed(
-                        pipedVideos, "search:" + query, "Search results for " + query);
-                    if (feed.contains("<entry")) return xml(feed);
-                }
-
+                // Preserve the existing policy: don't hit legacy fallbacks while
+                // either public pool is healthy, even when the query has no matches.
                 if (invidious.getHealthyCount() > 0 || piped.getHealthyCount() > 0)
-                    return xml(emptyFeed("search"));
+                    return xml(primary.value != null ? primary.value : emptyFeed("search"));
 
-                String body = yt2009.fetchText(appendQuery("/feeds/api/videos", session.getParms()));
-                if (body != null && body.contains("<entry")) return xml(body);
-                try {
-                    JsonObject modern = innerTube.search(query);
-                    String modernFeed = FeedXmlBuilder.buildSearchFeed(modern, query);
-                    if (modernFeed.contains("<entry")) return xml(modernFeed);
-                } catch (Exception e) {
-                    Log.w(TAG, "InnerTube search fallback failed: " + e.getMessage());
-                }
-                return xml(body != null ? body : emptyFeed("search"));
+                SourceManager.Result<String> fallback = sourceManager.firstAvailable("search-fallback",
+                    rawFeedSource("yt2009", new SourceManager.Fetcher<String>() {
+                        @Override public String fetch() throws Exception {
+                            return yt2009.fetchText(appendQuery("/feeds/api/videos", session.getParms()));
+                        }
+                    }),
+                    rawFeedSource("innertube", new SourceManager.Fetcher<String>() {
+                        @Override public String fetch() {
+                            JsonObject modern = innerTube.search(query);
+                            return modern == null ? null : FeedXmlBuilder.buildSearchFeed(modern, query);
+                        }
+                    })
+                );
+                if (fallback.isSuccess()) return xml(fallback.value);
+                if (fallback.value != null) return xml(fallback.value);
+                return xml(primary.value != null ? primary.value : emptyFeed("search"));
             }
 
             // === /feeds/api/playlists/{id} — Invidious first ===
@@ -344,34 +352,49 @@ public class ProxyServer extends NanoHTTPD {
                 return xml(emptyFeed("playlist"));
             }
 
-            // === /feeds/api/standardfeeds/* — Invidious, then Piped trending ===
+            // === /feeds/api/standardfeeds/* — ordered provider fallback ===
             if (uri.startsWith("/feeds/api/standardfeeds/")) {
                 Log.i(TAG, "FEED: " + uri);
-                String feedName = stripQuery(uri.substring("/feeds/api/standardfeeds/".length()));
-                JsonArray trending = invidious.trending();
-                if (trending == null || trending.size() == 0) trending = piped.trending();
-                if (trending != null && trending.size() > 0) {
-                    String feed = FeedXmlBuilder.buildInvidiousFeed(
-                        trending, "standard:" + feedName, "Trending videos");
-                    if (feed.contains("<entry")) return xml(feed);
-                }
+                final String feedName = stripQuery(uri.substring("/feeds/api/standardfeeds/".length()));
 
+                SourceManager.Result<String> primary = sourceManager.firstAvailable("trending",
+                    videoArrayFeedSource("invidious", "standard:" + feedName,
+                        "Trending videos", new SourceManager.Fetcher<JsonArray>() {
+                            @Override public JsonArray fetch() { return invidious.trending(); }
+                        }),
+                    videoArrayFeedSource("piped", "standard:" + feedName,
+                        "Trending videos", new SourceManager.Fetcher<JsonArray>() {
+                            @Override public JsonArray fetch() { return piped.trending(); }
+                        })
+                );
+                if (primary.isSuccess()) return xml(primary.value);
                 if (invidious.getHealthyCount() > 0 || piped.getHealthyCount() > 0)
-                    return xml(emptyFeed("feed"));
+                    return xml(primary.value != null ? primary.value : emptyFeed("feed"));
 
-                String body = yt2009.fetchText(appendQuery(uri, session.getParms()));
-                if (body != null && body.contains("<entry")) return xml(body);
+                SourceManager.Source<String> yt2009Source = rawFeedSource("yt2009",
+                    new SourceManager.Fetcher<String>() {
+                        @Override public String fetch() throws Exception {
+                            return yt2009.fetchText(appendQuery(uri, session.getParms()));
+                        }
+                    });
+                SourceManager.Result<String> fallback;
                 if ("most_popular".equals(feedName) || "top_rated".equals(feedName)
                         || "recently_featured".equals(feedName)) {
-                    try {
-                        JsonObject modern = innerTube.browse("FEtrending");
-                        String modernFeed = FeedXmlBuilder.buildStandardFeed(modern, feedName);
-                        if (modernFeed.contains("<entry")) return xml(modernFeed);
-                    } catch (Exception e) {
-                        Log.w(TAG, "InnerTube standard feed fallback failed: " + e.getMessage());
-                    }
+                    fallback = sourceManager.firstAvailable("trending-fallback", yt2009Source,
+                        rawFeedSource("innertube", new SourceManager.Fetcher<String>() {
+                            @Override public String fetch() {
+                                JsonObject modern = innerTube.browse("FEtrending");
+                                return modern == null ? null
+                                    : FeedXmlBuilder.buildStandardFeed(modern, feedName);
+                            }
+                        })
+                    );
+                } else {
+                    fallback = sourceManager.firstAvailable("trending-fallback", yt2009Source);
                 }
-                return xml(body != null ? body : emptyFeed("feed"));
+                if (fallback.isSuccess()) return xml(fallback.value);
+                if (fallback.value != null) return xml(fallback.value);
+                return xml(primary.value != null ? primary.value : emptyFeed("feed"));
             }
 
             // === /feeds/api/users/default/* ===
@@ -395,28 +418,44 @@ public class ProxyServer extends NanoHTTPD {
                         }
                     }
 
-                    JsonArray recommendations = invidious.trending();
-                    if (recommendations == null || recommendations.size() == 0)
-                        recommendations = piped.trending();
-                    if (recommendations != null && recommendations.size() > 0) {
-                        return xml(FeedXmlBuilder.buildInvidiousFeed(
-                            recommendations, "default:recommendations", "Recommended videos"));
-                    }
+                    SourceManager.Result<String> publicFeed = sourceManager.firstAvailable(
+                        "recommendations",
+                        videoArrayFeedSource("invidious", "default:recommendations",
+                            "Recommended videos", new SourceManager.Fetcher<JsonArray>() {
+                                @Override public JsonArray fetch() { return invidious.trending(); }
+                            }),
+                        videoArrayFeedSource("piped", "default:recommendations",
+                            "Recommended videos", new SourceManager.Fetcher<JsonArray>() {
+                                @Override public JsonArray fetch() { return piped.trending(); }
+                            })
+                    );
+                    if (publicFeed.isSuccess()) return xml(publicFeed.value);
 
+                    // The public yt2009 feed is only a fallback when both API pools
+                    // are down. InnerTube remains the final unauthenticated option.
                     if (invidious.getHealthyCount() == 0 && piped.getHealthyCount() == 0) {
-                        String popular = yt2009.fetchText("/feeds/api/standardfeeds/most_popular");
-                        if (popular != null && popular.contains("<entry")) return xml(popular);
+                        SourceManager.Result<String> ytFallback = sourceManager.firstAvailable(
+                            "recommendations-fallback",
+                            rawFeedSource("yt2009", new SourceManager.Fetcher<String>() {
+                                @Override public String fetch() {
+                                    return yt2009.fetchText("/feeds/api/standardfeeds/most_popular");
+                                }
+                            })
+                        );
+                        if (ytFallback.isSuccess()) return xml(ytFallback.value);
                     }
 
-                    // InnerTube is the final public-feed fallback. This is discovery,
-                    // not a personalized account recommendation feed.
-                    try {
-                        JsonObject modern = innerTube.browse("FEtrending");
-                        String feed = FeedXmlBuilder.buildStandardFeed(modern, "most_popular");
-                        if (feed.contains("<entry")) return xml(feed);
-                    } catch (Exception e) {
-                        Log.w(TAG, "Default recommendations fallback failed: " + e.getMessage());
-                    }
+                    SourceManager.Result<String> modernFallback = sourceManager.firstAvailable(
+                        "recommendations-fallback",
+                        rawFeedSource("innertube", new SourceManager.Fetcher<String>() {
+                            @Override public String fetch() {
+                                JsonObject modern = innerTube.browse("FEtrending");
+                                return modern == null ? null
+                                    : FeedXmlBuilder.buildStandardFeed(modern, "most_popular");
+                            }
+                        })
+                    );
+                    if (modernFallback.isSuccess()) return xml(modernFallback.value);
                 }
                 return xml(emptyFeed(kind));
             }
@@ -1335,6 +1374,43 @@ public class ProxyServer extends NanoHTTPD {
         return q >= 0 ? s.substring(0, q) : s;
     }
 
+    private SourceManager.Source<String> videoArrayFeedSource(
+            String sourceName, final String feedId, final String title,
+            final SourceManager.Fetcher<JsonArray> fetcher) {
+        return SourceManager.Source.<String>of(sourceName,
+            new SourceManager.Fetcher<String>() {
+                @Override public String fetch() throws Exception {
+                    JsonArray videos = fetcher.fetch();
+                    if (videos == null) return null;
+                    return FeedXmlBuilder.buildInvidiousFeed(videos, feedId, title);
+                }
+            },
+            new SourceManager.DataCheck<String>() {
+                @Override public boolean hasData(String feed) {
+                    return feed != null && feed.contains("<entry");
+                }
+            });
+    }
+
+    private SourceManager.Source<String> rawFeedSource(
+            String sourceName, final SourceManager.Fetcher<String> fetcher) {
+        return SourceManager.Source.<String>of(sourceName,
+            new SourceManager.Fetcher<String>() {
+                @Override public String fetch() throws Exception {
+                    String feed = fetcher.fetch();
+                    if (feed == null) return null;
+                    if (!feed.contains("<feed"))
+                        throw new IOException("Provider returned an invalid Atom feed");
+                    return feed;
+                }
+            },
+            new SourceManager.DataCheck<String>() {
+                @Override public boolean hasData(String feed) {
+                    return feed != null && feed.contains("<entry");
+                }
+            });
+    }
+
     private Response healthResponse() {
         JsonObject status = new JsonObject();
         status.addProperty("ok", true);
@@ -1346,6 +1422,7 @@ public class ProxyServer extends NanoHTTPD {
         status.addProperty("backend", selectedBackend);
         status.add("invidious", invidious.getStatus());
         status.add("piped", piped.getStatus());
+        status.add("sourceRouting", sourceManager.getStatus());
 
         JsonObject account = new JsonObject();
         account.addProperty("optional", true);
