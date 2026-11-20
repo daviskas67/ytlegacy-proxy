@@ -49,6 +49,30 @@ public class YouTubeV3ProtoTest {
         assertNull("field 1 is not Upload.videoId", findField(uploadFields, 1));
     }
 
+    @Test
+    public void timedOutFeedLookupCanReturnAValidPlaceholderVideo() {
+        String videoId = "abcdefghijk";
+        VideoData placeholder = VideoData.feedPlaceholder(videoId);
+
+        assertNotNull(placeholder);
+        assertEquals(videoId, placeholder.id);
+        assertEquals(videoId, placeholder.title);
+        assertEquals("YouTube", placeholder.author);
+        assertEquals("", placeholder.channelId);
+
+        List<JsonObject> videos = new ArrayList<JsonObject>();
+        videos.add(placeholder.toYouTubeV3Json());
+        List<Field> response = fields(YouTubeV3Proto.videos(videos));
+        assertEquals("placeholder is still present in the batch response", 1, response.size());
+
+        List<Field> item = fields(requireField(response, 1007, 2).payload);
+        assertEquals(videoId, text(requireField(item, 101, 2)));
+        List<Field> snippet = fields(requireField(item, 2, 2).payload);
+        assertEquals(videoId, text(requireField(snippet, 3, 2)));
+        assertEquals("YouTube", text(requireField(snippet, 6, 2)));
+        assertNull(VideoData.feedPlaceholder("invalid"));
+    }
+
     private static final class Field {
         final int number;
         final int wireType;
