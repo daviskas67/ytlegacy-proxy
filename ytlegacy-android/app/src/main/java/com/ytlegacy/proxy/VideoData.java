@@ -150,6 +150,21 @@ public class VideoData {
         return v;
     }
 
+    /**
+     * Minimal complete feed record used when an upstream metadata lookup misses
+     * the shared batch deadline. Keeping the video ID prevents the legacy client
+     * from losing the corresponding activity while rendering the feed.
+     */
+    public static VideoData feedPlaceholder(String videoId) {
+        if (videoId == null || !videoId.matches("[A-Za-z0-9_-]{11}")) return null;
+        VideoData video = new VideoData();
+        video.id = videoId;
+        video.title = videoId;
+        video.author = "YouTube";
+        video.channelId = "";
+        return video;
+    }
+
     /** Converts this model to the subset of a YouTube Data API v3 video used by the legacy client. */
     public JsonObject toYouTubeV3Json() {
         JsonObject result = new JsonObject();
