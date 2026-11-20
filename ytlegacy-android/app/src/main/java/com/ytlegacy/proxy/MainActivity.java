@@ -236,7 +236,7 @@ public class MainActivity extends Activity {
         final String desktopUrl = result.optString("desktopUrl", "http://femboy.email:730/gsign");
         String message = "On a PC, open:\n" + desktopUrl
             + "\n\nEnter this device code:\n" + code
-            + "\n\nFollow the sign-in steps shown by yt2009. When the account is linked, return here and tap Check sign-in status. Then select the YouTube channel.";
+            + "\n\nFollow the sign-in steps shown by yt2009. Keep this app open: it checks the account automatically every five seconds. When yt2009 confirms the account, the app will offer to open the YouTube channel picker.";
         new AlertDialog.Builder(this)
             .setTitle("yt2009 Google sign-in")
             .setMessage(message)
