@@ -157,7 +157,9 @@ public class VideoData {
         result.addProperty("title", title);
         result.addProperty("description", description);
         result.addProperty("author", author);
-        result.addProperty("authorId", channelId);
+        String validChannelId = channelId != null && channelId.matches("UC[A-Za-z0-9_-]{22}")
+            ? channelId : "";
+        result.addProperty("authorId", validChannelId);
         result.addProperty("lengthSeconds", lengthSeconds);
         result.addProperty("viewCount", viewCount);
         result.addProperty("likeCount", likeCount);
