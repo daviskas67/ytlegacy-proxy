@@ -165,7 +165,7 @@ public final class PipedClient {
         return normalizeVideos(result);
     }
 
-    private JsonArray normalizeVideos(JsonElement response) {
+    JsonArray normalizeVideos(JsonElement response) {
         JsonArray source = null;
         if (response != null && response.isJsonArray()) {
             source = response.getAsJsonArray();
@@ -211,10 +211,6 @@ public final class PipedClient {
 
 
     // Package-private seam for local unit tests; production callers use search/trending.
-    JsonArray normalizeVideosForTest(JsonElement response) {
-        return normalizeVideos(response);
-    }
-
     private JsonElement getJson(String path) {
         awaitInitialProbe();
         if (System.currentTimeMillis() - lastProbeAt >= PROBE_INTERVAL_MS)
