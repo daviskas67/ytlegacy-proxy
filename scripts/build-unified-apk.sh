@@ -7,12 +7,23 @@ PROXY_APK="$ROOT/ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk"
 WORK="$ROOT/ytlegacy-android/build/unified"
 OUT="$WORK/ytlegacy-5.0.21-v1.16-unified.apk"
 ALIGNED="$WORK/ytlegacy-5.0.21-v1.16-aligned.apk"
+SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+BUILD_TOOLS="${SDK_ROOT}/build-tools/30.0.3"
+if [[ -d "$BUILD_TOOLS" ]]; then
+  export PATH="$BUILD_TOOLS:$PATH"
+fi
+ZIPALIGN="${ZIPALIGN:-$BUILD_TOOLS/zipalign}"
+APKSIGNER="${APKSIGNER:-$BUILD_TOOLS/apksigner}"
+AAPT="${AAPT:-$BUILD_TOOLS/aapt}"
 
 for file in "$BASE_APK" "$PROXY_APK"; do
   [[ -s "$file" ]] || { echo "Missing input APK: $file" >&2; exit 1; }
 done
-for tool in apktool zipalign apksigner aapt python3; do
+for tool in apktool python3; do
   command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 1; }
+done
+for tool in "$ZIPALIGN" "$APKSIGNER" "$AAPT"; do
+  [[ -x "$tool" ]] || { echo "Missing Android build tool: $tool" >&2; exit 1; }
 done
 
 rm -rf "$WORK"
@@ -80,10 +91,10 @@ with zipfile.ZipFile(apk) as z:
     print("classes.dex: %d bytes, %d method references, %d classes" %
           (len(data), method_ids, class_defs))
 PY
-aapt dump badging "$WORK/unsigned.apk" | grep -E "^(package:|sdkVersion:|targetSdkVersion:|application-label:|launchable-activity:)" || true
+"$AAPT" dump badging "$WORK/unsigned.apk" | grep -E "^(package:|sdkVersion:|targetSdkVersion:|application-label:|launchable-activity:)" || true
 
 echo "[6/7] Zipalign and sign the combined APK"
-zipalign -f 4 "$WORK/unsigned.apk" "$ALIGNED"
+"$ZIPALIGN" -f 4 "$WORK/unsigned.apk" "$ALIGNED"
 KEYSTORE="${YTLEGACY_KEYSTORE:-$HOME/.android/debug.keystore}"
 STOREPASS="${YTLEGACY_KEYSTORE_PASSWORD:-android}"
 ALIAS="${YTLEGACY_KEY_ALIAS:-androiddebugkey}"
@@ -94,9 +105,9 @@ if [[ ! -s "$KEYSTORE" ]]; then
     -alias "$ALIAS" -keypass "$KEYPASS" -keyalg RSA -keysize 2048 \
     -validity 10000 -dname "CN=ytlegacy unified debug,O=ytlegacy,C=US" >/dev/null 2>&1
 fi
-apksigner sign --ks "$KEYSTORE" --ks-pass "pass:$STOREPASS" \
+"$APKSIGNER" sign --ks "$KEYSTORE" --ks-pass "pass:$STOREPASS" \
   --key-pass "pass:$KEYPASS" --out "$OUT" "$ALIGNED"
-apksigner verify --verbose "$OUT"
+"$APKSIGNER" verify --verbose "$OUT"
 
 echo "[7/7] Combined APK ready"
 ls -lh "$OUT"
