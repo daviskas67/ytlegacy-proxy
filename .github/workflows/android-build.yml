@@ -35,9 +35,13 @@ jobs:
         with:
           gradle-version: "7.5.1"
 
+      - name: Run JVM unit tests
+        working-directory: ytlegacy-android
+        run: gradle --no-daemon :app:testDebugUnitTest
+
       - name: Assemble debug APK
         working-directory: ytlegacy-android
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+        run: gradle --no-daemon :app:assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
