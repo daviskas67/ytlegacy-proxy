@@ -2,6 +2,26 @@
 
 All notable changes recorded here are for the releases updated during the current maintenance work. Dates use YYYY-MM-DD.
 
+## [1.11] - 2026-11-20
+
+### Added
+- Added `Yt2009AccountManager` for the upstream yt2009 `gsign` device-linking flow, pinned to `http://femboy.email:730`.
+- Added local `POST /api/yt2009/login/start`, `GET /api/yt2009/login/status`, and `GET /api/yt2009/login/picker` endpoints.
+- Added MainActivity controls to start sign-in, copy the device code, check the linked account, and open the YouTube channel picker.
+- Added `Yt2009Client.fetchAccountFeed`, which requests the personalized recommendations route with `X-GData-Device` and never sends that identifier through dynamic instance failover.
+- Personalized yt2009 recommendations are now attempted before public Invidious/Piped discovery feeds for the legacy default subscriptions/activity routes.
+- Added local redirects for legacy `/gsign` and account-picker links.
+
+### Changed
+- Set Android `versionName` to `1.11` and `versionCode` to `8`.
+- The proxy stores only the seven-character yt2009 device code locally. The upstream yt2009 instance handles the Google authorization token and account session.
+
+### Security and compatibility notes
+- This is yt2009's legacy `gsign` flow, not standard Google OAuth 2.0.
+- The configured instance URL is plain HTTP. The Google authorization token is submitted directly by the upstream sign-in page to that host and can be intercepted by an observer on the network. Use only when the operator and network are trusted.
+- The proxy sends the account device identifier only to `femboy.email:730`; it is not forwarded to public Invidious/Piped pools or discovered yt2009 instances.
+- No physical-device sign-in or personalized-feed test is claimed yet. The upstream sign-in and channel-picker flow must be completed in a browser, then verified on the target Android device.
+
 ## [1.10] - 2026-11-20
 
 ### Added
