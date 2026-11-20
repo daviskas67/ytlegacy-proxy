@@ -48,6 +48,12 @@ public class ProxyServer extends NanoHTTPD {
         invidious.refreshInBackground();
     }
 
+    private Response protobuf(byte[] data) {
+        byte[] body = data == null ? new byte[0] : data;
+        return newFixedLengthResponse(Response.Status.OK, "application/x-protobuf",
+            new java.io.ByteArrayInputStream(body), body.length);
+    }
+
     @Override
     public Response serve(IHTTPSession session) {
         String uri = session.getUri();
@@ -107,15 +113,37 @@ public class ProxyServer extends NanoHTTPD {
                 return newFixedLengthResponse(Response.Status.OK, "text/plain", "");
             if (uri.startsWith("/youtube/v3/")) {
                 Log.i(TAG, "YOUTUBE_V3: " + uri);
-                // The legacy client parses these endpoints as protobuf, not JSON.
-                // An empty protobuf response represents an empty/default result
-                // and avoids feeding JSON bytes into the protobuf parser.
-                if (uri.startsWith("/youtube/v3/players")
-                        || uri.startsWith("/youtube/v3/activities")) {
-                    return newFixedLengthResponse(Response.Status.OK, "application/x-protobuf", "");
+                if (uri.startsWith("/youtube/v3/activities")) {
+                    int max = 20;
+                    try { max = Integer.parseInt(session.getParms().get("maxResults")); }
+                    catch (Exception ignored) {}
+                    max = Math.max(1, Math.min(max, 50));
+                    JsonArray trending = invidious.trending();
+                    return protobuf(YouTubeV3Proto.activities(trending, max));
                 }
-                // Other v3 endpoints currently use the legacy JSON placeholder.
-                return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"items\":[]}");
+                if (uri.startsWith("/youtube/v3/videos")) {
+                    java.util.List<JsonObject> videos = new java.util.ArrayList<JsonObject>();
+                    java.util.List<String> ids = YouTubeV3Proto.parseIds(session.getParms().get("id"), 50);
+                    for (String id : ids) {
+                        if (!VIDEO_ID.matcher(id).matches()) continue;
+                        JsonObject video = invidious.video(id);
+                        if (video != null) videos.add(video);
+                    }
+                    return protobuf(YouTubeV3Proto.videos(videos));
+                }
+                if (uri.startsWith("/youtube/v3/channels")) {
+                    java.util.List<JsonObject> channels = new java.util.ArrayList<JsonObject>();
+                    java.util.List<String> ids = YouTubeV3Proto.parseIds(session.getParms().get("id"), 50);
+                    for (String id : ids) {
+                        if (!id.startsWith("UC") || id.length() != 24) continue;
+                        JsonObject channel = invidious.channel(id);
+                        if (channel != null) channels.add(channel);
+                    }
+                    return protobuf(YouTubeV3Proto.channels(channels));
+                }
+                // The legacy player endpoint is not needed for feed cards yet,
+                // but it must still receive a valid protobuf body.
+                return protobuf(new byte[0]);
             }
             if (uri.startsWith("/schemas/2007/categories.cat"))
                 return categoriesResponse();
