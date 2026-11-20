@@ -144,7 +144,7 @@ public class MainActivity extends Activity {
         addButton(layout, pickerButton, density);
 
         TextView privacy = new TextView(this);
-        privacy.setText("Sign-in is handled by the selected yt2009 instance. Its gsign page receives the authorization token and keeps the account session on that server. Use only the instance you trust.");
+        privacy.setText("yt2009 gsign sends the Google authorization token to femboy.email over plain HTTP. The token can be intercepted on an untrusted network. Use only if you trust this host and network; the proxy itself does not store the token.");
         privacy.setTextColor(Color.GRAY);
         privacy.setTextSize(11);
         privacy.setGravity(Gravity.CENTER);
