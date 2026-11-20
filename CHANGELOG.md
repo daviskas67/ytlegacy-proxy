@@ -22,6 +22,10 @@ All notable changes recorded here are for the releases updated during the curren
 - Google account sign-in and personalized recommendations are not implemented. The upstream yt2009 `gsign` flow is not standard OAuth and requires handing sensitive authorization data to a third-party server. This release does not forward Google tokens to public instances. A safe authenticated integration requires a separately configured Google OAuth client and YouTube API access.
 - No physical-device test of the new Piped feed path is claimed yet.
 
+### Verification status
+- The Android debug APK built successfully in GitHub Actions for commit `683bde495c48b0ac001c3cb02724dc5a0669c487` (run `44704171753`).
+- The new Piped search/trending paths and the community instance pools still need validation on a physical Android device. Health checks at runtime determine which endpoints are usable.
+
 ## [1.9] - 2026-11-20
 
 ### Added
