@@ -186,12 +186,21 @@ public class ProxyServer extends NanoHTTPD {
                         }, YOUTUBE_V3_BATCH_DEADLINE_MS);
 
                     java.util.List<JsonObject> videos = new java.util.ArrayList<JsonObject>();
-                    for (VideoData video : loaded) {
+                    int placeholderCount = 0;
+                    for (int i = 0; i < validIds.size(); i++) {
+                        VideoData video = i < loaded.size() ? loaded.get(i) : null;
+                        if (video == null) {
+                            // Keep one response item for every requested ID. The legacy
+                            // feed joins activities to videos by ID and can crash while
+                            // rendering if a slow provider causes an item to disappear.
+                            video = VideoData.feedPlaceholder(validIds.get(i));
+                            placeholderCount++;
+                        }
                         if (video != null) videos.add(video.toYouTubeV3Json());
                     }
                     Log.i(TAG, "YOUTUBE_V3 videos batch complete: requested=" + validIds.size()
-                        + " returned=" + videos.size() + " elapsedMs="
-                        + ((System.nanoTime() - batchStarted) / 1000000L));
+                        + " returned=" + videos.size() + " placeholders=" + placeholderCount
+                        + " elapsedMs=" + ((System.nanoTime() - batchStarted) / 1000000L));
                     return protobuf(YouTubeV3Proto.videos(videos));
                 }
                 if (uri.startsWith("/youtube/v3/channels")) {
