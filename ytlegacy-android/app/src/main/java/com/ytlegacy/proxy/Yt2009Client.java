@@ -486,6 +486,9 @@ public class Yt2009Client {
                             String value = entry.getValue();
                             if (key == null || value == null) continue;
                             String lower = key.toLowerCase(Locale.US);
+                            // Account device identity is sent only by fetchAccountFeed()
+                            // to the explicitly pinned femboy.email instance.
+                            if ("x-gdata-device".equals(lower)) continue;
                             if ("host".equals(lower) || "connection".equals(lower) || "proxy-connection".equals(lower) || "keep-alive".equals(lower) || "transfer-encoding".equals(lower) || "content-length".equals(lower) || "upgrade".equals(lower)) continue;
                             if ("user-agent".equals(lower) || "accept".equals(lower) || "accept-language".equals(lower) || "range".equals(lower) || "referer".equals(lower) || "origin".equals(lower)  || "if-none-match".equals(lower) || "if-modified-since".equals(lower) || "content-type".equals(lower) || lower.startsWith("x-gdata-") || lower.startsWith("x-youtube-")) {
                                 connection.setRequestProperty(key, value);
