@@ -157,7 +157,7 @@ app/build/outputs/apk/debug/app-debug.apk
 
 GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.13-debug` (доступен 14 дней) и публикует v1.13 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
 
-Проверочная сборка v1.12 прошла успешно: [GitHub Actions run #44710217250](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44710217250).
+Сборка v1.13 прошла успешно: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
 
 Дополнительный скрипт `build-manual.sh` рассчитан на окружения, где уже доступны Android SDK tools, D8, Gson 2.2.4 и NanoHTTPD 2.3.1 JAR-файлы.
 
@@ -354,7 +354,7 @@ app/build/outputs/apk/debug/app-debug.apk
 
 GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.11-debug` artifact (available for 14 days) and publishes the v1.13 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
 
-The v1.12 verification build passed: [GitHub Actions run #44710217250](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44710217250).
+The v1.13 build passed: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
 
 The optional `build-manual.sh` script is intended for environments that already provide Android SDK tools, D8, Gson 2.2.4, and NanoHTTPD 2.3.1 JARs.
 
