@@ -127,7 +127,7 @@ public final class PipedClient {
                     });
                 }
                 executor.shutdown();
-                try { latch.await(15L, TimeUnit.SECONDS); }
+                try { latch.await(45L, TimeUnit.SECONDS); }
                 catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                 synchronized (lock) {
                     lastProbeAt = System.currentTimeMillis();
