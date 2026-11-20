@@ -37,6 +37,11 @@ public class ProxyServer extends NanoHTTPD {
     private final java.util.Map<String, String> channelCache = new java.util.concurrent.ConcurrentHashMap<String, String>();
     private final java.util.Map<String, Long> channelCacheTime = new java.util.concurrent.ConcurrentHashMap<String, Long>();
     private static final long CHANNEL_TTL = 600000L;
+    private static final long YOUTUBE_V3_BATCH_DEADLINE_MS = 14000L;
+    private final MetadataCache<VideoData> videoMetadataCache =
+        new MetadataCache<VideoData>(256, 300000L);
+    private final MetadataCache<JsonObject> channelMetadataCache =
+        new MetadataCache<JsonObject>(128, 600000L);
     private static byte[] EMPTY_MP4 = null;
     private final java.util.Map<String, String> nameToUc = new java.util.concurrent.ConcurrentHashMap<String, String>();
     private final Map<String, Long> likeCache = new ConcurrentHashMap<String, Long>();
@@ -164,24 +169,53 @@ public class ProxyServer extends NanoHTTPD {
                     return protobuf(YouTubeV3Proto.activities(trending, max));
                 }
                 if (uri.startsWith("/youtube/v3/videos")) {
-                    java.util.List<JsonObject> videos = new java.util.ArrayList<JsonObject>();
-                    java.util.List<String> ids = YouTubeV3Proto.parseIds(session.getParms().get("id"), 50);
-                    String quality = PlaybackSettings.getQuality(applicationContext);
+                    final java.util.List<String> ids =
+                        YouTubeV3Proto.parseIds(session.getParms().get("id"), 50);
+                    final java.util.List<String> validIds = new java.util.ArrayList<String>();
                     for (String id : ids) {
-                        if (!VIDEO_ID.matcher(id).matches()) continue;
-                        VideoData video = getVideoData(id, quality, false);
+                        if (VIDEO_ID.matcher(id).matches()) validIds.add(id);
+                    }
+                    final String quality = PlaybackSettings.getQuality(applicationContext);
+                    long batchStarted = System.nanoTime();
+                    java.util.List<VideoData> loaded = MetadataBatchLoader.load(validIds,
+                        new MetadataBatchLoader.Loader<VideoData>() {
+                            @Override public VideoData load(String id) {
+                                return getVideoData(id, quality, false);
+                            }
+                        }, YOUTUBE_V3_BATCH_DEADLINE_MS);
+
+                    java.util.List<JsonObject> videos = new java.util.ArrayList<JsonObject>();
+                    for (VideoData video : loaded) {
                         if (video != null) videos.add(video.toYouTubeV3Json());
                     }
+                    Log.i(TAG, "YOUTUBE_V3 videos batch complete: requested=" + validIds.size()
+                        + " returned=" + videos.size() + " elapsedMs="
+                        + ((System.nanoTime() - batchStarted) / 1000000L));
                     return protobuf(YouTubeV3Proto.videos(videos));
                 }
                 if (uri.startsWith("/youtube/v3/channels")) {
-                    java.util.List<JsonObject> channels = new java.util.ArrayList<JsonObject>();
-                    java.util.List<String> ids = YouTubeV3Proto.parseIds(session.getParms().get("id"), 50);
+                    java.util.List<String> ids =
+                        YouTubeV3Proto.parseIds(session.getParms().get("id"), 50);
+                    final java.util.List<String> validIds = new java.util.ArrayList<String>();
                     for (String id : ids) {
-                        if (!id.startsWith("UC") || id.length() != 24) continue;
-                        JsonObject channel = invidious.channel(id);
+                        if (id != null && id.startsWith("UC") && id.length() == 24)
+                            validIds.add(id);
+                    }
+                    long batchStarted = System.nanoTime();
+                    java.util.List<JsonObject> loaded = MetadataBatchLoader.load(validIds,
+                        new MetadataBatchLoader.Loader<JsonObject>() {
+                            @Override public JsonObject load(String id) {
+                                return getChannelMetadataForFeed(id);
+                            }
+                        }, YOUTUBE_V3_BATCH_DEADLINE_MS);
+
+                    java.util.List<JsonObject> channels = new java.util.ArrayList<JsonObject>();
+                    for (JsonObject channel : loaded) {
                         if (channel != null) channels.add(channel);
                     }
+                    Log.i(TAG, "YOUTUBE_V3 channels batch complete: requested=" + validIds.size()
+                        + " returned=" + channels.size() + " elapsedMs="
+                        + ((System.nanoTime() - batchStarted) / 1000000L));
                     return protobuf(YouTubeV3Proto.channels(channels));
                 }
                 // The legacy player endpoint is not needed for feed cards yet,
@@ -779,10 +813,18 @@ public class ProxyServer extends NanoHTTPD {
     }
 
     private VideoData getVideoData(String vid, String quality, boolean resolveStream) {
+        if (!resolveStream) {
+            VideoData cached = videoMetadataCache.get(vid);
+            if (cached != null) {
+                Log.d(TAG, "getVideoData: metadata cache hit for " + vid);
+                return cached;
+            }
+        }
+
         VideoData v = null;
         boolean invidiousMetadataLoaded = false;
         try {
-            JsonObject data = invidious.video(vid);
+            JsonObject data = resolveStream ? invidious.video(vid) : invidious.videoForFeed(vid);
             VideoData fromInvidious = VideoData.fromInvidious(data, quality);
             if (fromInvidious != null) {
                 v = fromInvidious;
@@ -803,7 +845,7 @@ public class ProxyServer extends NanoHTTPD {
         boolean pipedMetadataLoaded = false;
         if (!invidiousMetadataLoaded || (resolveStream && (v.streamUrl == null || v.streamUrl.isEmpty()))) {
             try {
-                JsonObject data = piped.streams(vid);
+                JsonObject data = resolveStream ? piped.streams(vid) : piped.streamsForFeed(vid);
                 VideoData fromPiped = VideoData.fromPiped(data, vid, quality);
                 if (fromPiped != null) {
                     pipedMetadataLoaded = true;
@@ -840,7 +882,10 @@ public class ProxyServer extends NanoHTTPD {
         }
 
         boolean legacyMetadataLoaded = false;
-        if (!invidiousMetadataLoaded && !pipedMetadataLoaded) {
+        // Feed metadata must stay within the short batch budget. The historical
+        // yt2009 path can wait up to 60 seconds and InnerTube up to 20 seconds;
+        // those long fallbacks remain available for explicit player requests only.
+        if (resolveStream && !invidiousMetadataLoaded && !pipedMetadataLoaded) {
             try {
                 Yt2009Client.Info info = yt2009.getVideoInfo(vid);
                 if ("ok".equals(info.status)) {
@@ -859,8 +904,9 @@ public class ProxyServer extends NanoHTTPD {
 
         // InnerTube is the final metadata/stream fallback, or fills a missing
         // playable stream after a metadata-only provider response.
-        if ((!invidiousMetadataLoaded && !pipedMetadataLoaded && !legacyMetadataLoaded)
-                || (resolveStream && (v.streamUrl == null || v.streamUrl.isEmpty()))) {
+        if (resolveStream && ((!invidiousMetadataLoaded && !pipedMetadataLoaded
+                && !legacyMetadataLoaded)
+                || (v.streamUrl == null || v.streamUrl.isEmpty()))) {
             try {
                 VideoData modern = VideoData.fromInnerTube(innerTube.player(vid), quality);
                 if (modern != null) {
@@ -928,8 +974,21 @@ public class ProxyServer extends NanoHTTPD {
         if (v.title == null || v.title.isEmpty()) v.title = vid;
         if (v.author == null || v.author.isEmpty()) v.author = "YouTube";
         if (v.channelId == null || v.channelId.isEmpty()) v.channelId = v.author;
+        if (!resolveStream && (invidiousMetadataLoaded || pipedMetadataLoaded))
+            videoMetadataCache.put(vid, v);
         Log.i(TAG, "getVideoData: id=" + v.id + " title='" + v.title + "' ch='" + v.channelId + "'");
         return v;
+    }
+
+    private JsonObject getChannelMetadataForFeed(String channelId) {
+        JsonObject cached = channelMetadataCache.get(channelId);
+        if (cached != null) {
+            Log.d(TAG, "channel metadata cache hit for " + channelId);
+            return cached;
+        }
+        JsonObject channel = invidious.channelForFeed(channelId);
+        if (channel != null) channelMetadataCache.put(channelId, channel);
+        return channel;
     }
 
     private Response servePlayback(final String videoId,
