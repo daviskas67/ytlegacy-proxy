@@ -30,6 +30,11 @@ jobs:
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-30" "build-tools;30.0.3"
 
+      - name: Install APK merge tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apktool
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
