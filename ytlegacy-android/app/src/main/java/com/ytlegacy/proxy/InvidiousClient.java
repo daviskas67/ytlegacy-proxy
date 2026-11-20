@@ -325,7 +325,10 @@ public final class InvidiousClient {
             }
 
             if (statusCode == 0 || statusCode == 429 || statusCode >= 500 || statusCode == 200) {
-                markFailed(server, "HTTP " + statusCode + " for " + path);
+                String reason = statusCode == 200
+                    ? "HTTP 200 body read/JSON parse failed for " + path
+                    : "HTTP " + statusCode + " for " + path;
+                markFailed(server, reason);
             } else {
                 // 4xx usually means a missing/private resource, not a dead instance.
                 markResponsive(server, latency);
