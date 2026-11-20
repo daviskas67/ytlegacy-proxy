@@ -30,6 +30,9 @@ public final class PipedClient {
     private static final String TAG = "Piped";
     private static final int CONNECT_TIMEOUT_MS = 2500;
     private static final int READ_TIMEOUT_MS = 5000;
+    private static final int REQUEST_CONNECT_TIMEOUT_MS = 1200;
+    private static final int REQUEST_READ_TIMEOUT_MS = 2500;
+    private static final int MAX_REQUEST_ATTEMPTS = 2;
     private static final long DOWN_TTL_MS = 60000L;
     private static final long PROBE_INTERVAL_MS = 60000L;
 
@@ -224,12 +227,16 @@ public final class PipedClient {
             refreshInBackground();
 
         List<Server> ordered = getOrderedServers();
+        int attempts = 0;
         for (Server server : ordered) {
             synchronized (lock) {
                 if (!server.probed || !server.alive || server.deadUntil > System.currentTimeMillis()) continue;
             }
+            if (attempts >= MAX_REQUEST_ATTEMPTS) break;
+            attempts++;
             long start = System.nanoTime();
-            JsonElement result = requestRaw(server.base, path, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
+            JsonElement result = requestRaw(server.base, path,
+                REQUEST_CONNECT_TIMEOUT_MS, REQUEST_READ_TIMEOUT_MS);
             long latency = Math.max(1L, (System.nanoTime() - start) / 1000000L);
             int status = lastHttpStatus.get() == null ? 0 : lastHttpStatus.get().intValue();
 
