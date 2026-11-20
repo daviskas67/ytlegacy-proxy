@@ -35,6 +35,7 @@ def patch_manifest(path: pathlib.Path) -> None:
             a("name"): "com.ytlegacy.proxy.ProxyService",
             a("enabled"): "true",
             a("exported"): "false",
+            a("foregroundServiceType"): "dataSync",
         })
 
     permissions = {
@@ -44,6 +45,8 @@ def patch_manifest(path: pathlib.Path) -> None:
         ET.SubElement(root, "uses-permission", {a("name"): "android.permission.INTERNET"})
     if "android.permission.WAKE_LOCK" not in permissions:
         ET.SubElement(root, "uses-permission", {a("name"): "android.permission.WAKE_LOCK"})
+    if "android.permission.FOREGROUND_SERVICE" not in permissions:
+        ET.SubElement(root, "uses-permission", {a("name"): "android.permission.FOREGROUND_SERVICE"})
 
     tree.write(str(path), encoding="utf-8", xml_declaration=True)
 
