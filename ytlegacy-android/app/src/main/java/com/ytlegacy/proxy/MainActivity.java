@@ -2,11 +2,14 @@ package com.ytlegacy.proxy;
 
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.view.Gravity;
@@ -16,7 +19,19 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
 public class MainActivity extends Activity {
+    private TextView accountStatus;
+    private String lastDeviceCode = "";
+    private String lastPickerUrl = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,14 +66,13 @@ public class MainActivity extends Activity {
         status.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        statusParams.bottomMargin = (int) (24 * density + 0.5f);
+        statusParams.bottomMargin = (int) (18 * density + 0.5f);
         layout.addView(status, statusParams);
 
         Button toggleButton = new Button(this);
         toggleButton.setText("Start / Stop");
         toggleButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
+            @Override public void onClick(View view) {
                 Intent intent = new Intent(MainActivity.this, ProxyService.class);
                 if (isServiceRunning()) {
                     stopService(intent);
@@ -69,34 +83,259 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        buttonParams.bottomMargin = (int) (12 * density + 0.5f);
-        layout.addView(toggleButton, buttonParams);
+        addButton(layout, toggleButton, density);
 
         Button copyButton = new Button(this);
         copyButton.setText("Copy IP");
         copyButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                if (Build.VERSION.SDK_INT >= 11) {
-                    ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                    if (clipboard != null) {
-                        ClipData clip = ClipData.newPlainText("Proxy address", "127.0.0.1:8080");
-                        clipboard.setPrimaryClip(clip);
-                    }
-                } else {
-                    android.text.ClipboardManager clipboard =
-                        (android.text.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                    if (clipboard != null) clipboard.setText("127.0.0.1:8080");
-                }
+            @Override public void onClick(View view) {
+                copyText("127.0.0.1:8080");
                 Toast.makeText(MainActivity.this, "Copied!", Toast.LENGTH_SHORT).show();
             }
         });
-        layout.addView(copyButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        addButton(layout, copyButton, density);
+
+        TextView accountTitle = new TextView(this);
+        accountTitle.setText("yt2009 account");
+        accountTitle.setTextColor(Color.WHITE);
+        accountTitle.setTextSize(20);
+        accountTitle.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams accountTitleParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        accountTitleParams.topMargin = (int) (18 * density + 0.5f);
+        accountTitleParams.bottomMargin = (int) (8 * density + 0.5f);
+        layout.addView(accountTitle, accountTitleParams);
+
+        accountStatus = new TextView(this);
+        accountStatus.setText("Account: not linked");
+        accountStatus.setTextColor(Color.LTGRAY);
+        accountStatus.setTextSize(14);
+        accountStatus.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams accountStatusParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        accountStatusParams.bottomMargin = (int) (8 * density + 0.5f);
+        layout.addView(accountStatus, accountStatusParams);
+
+        Button loginButton = new Button(this);
+        loginButton.setText("Start Google account sign-in");
+        loginButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                startGoogleLogin();
+            }
+        });
+        addButton(layout, loginButton, density);
+
+        Button checkButton = new Button(this);
+        checkButton.setText("Check sign-in status");
+        checkButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                checkGoogleLogin(false);
+            }
+        });
+        addButton(layout, checkButton, density);
+
+        Button pickerButton = new Button(this);
+        pickerButton.setText("Select YouTube channel");
+        pickerButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                checkGoogleLogin(true);
+            }
+        });
+        addButton(layout, pickerButton, density);
+
+        TextView privacy = new TextView(this);
+        privacy.setText("Sign-in is handled by the selected yt2009 instance. Its gsign page receives the authorization token and keeps the account session on that server. Use only the instance you trust.");
+        privacy.setTextColor(Color.GRAY);
+        privacy.setTextSize(11);
+        privacy.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams privacyParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        privacyParams.topMargin = (int) (10 * density + 0.5f);
+        layout.addView(privacy, privacyParams);
 
         setContentView(layout);
+    }
+
+    private void startGoogleLogin() {
+        if (!isServiceRunning()) {
+            Toast.makeText(this, "Start the proxy first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        accountStatus.setText("Contacting femboy.email:730...");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final JSONObject result = requestLocal("/api/yt2009/login/start", "POST");
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            if (!result.optBoolean("ok", false)) {
+                                accountStatus.setText("Account: could not start sign-in");
+                                showMessage("yt2009 sign-in", result.optString("error", "Connection failed"));
+                                return;
+                            }
+                            lastDeviceCode = result.optString("device", "");
+                            lastPickerUrl = result.optString("pickerUrl", "");
+                            accountStatus.setText("Waiting for sign-in · code " + lastDeviceCode);
+                            showLoginInstructions(result);
+                        }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            accountStatus.setText("Account: sign-in unavailable");
+                            showMessage("yt2009 sign-in", e.getMessage());
+                        }
+                    });
+                }
+            }
+        }, "yt2009-login-start").start();
+    }
+
+    private void showLoginInstructions(final JSONObject result) {
+        final String code = result.optString("device", "");
+        final String desktopUrl = result.optString("desktopUrl", "http://femboy.email:730/gsign");
+        String message = "On a PC, open:\n" + desktopUrl
+            + "\n\nEnter this device code:\n" + code
+            + "\n\nFollow the sign-in steps shown by yt2009. When the account is linked, return here and tap Check sign-in status. Then select the YouTube channel.";
+        new AlertDialog.Builder(this)
+            .setTitle("yt2009 Google sign-in")
+            .setMessage(message)
+            .setPositiveButton("Copy device code", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    copyText(code);
+                    Toast.makeText(MainActivity.this, "Device code copied", Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNeutralButton("Copy PC URL", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    copyText(desktopUrl);
+                    Toast.makeText(MainActivity.this, "URL copied", Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton("Close", null)
+            .show();
+    }
+
+    private void checkGoogleLogin(final boolean openPicker) {
+        if (!isServiceRunning()) {
+            Toast.makeText(this, "Start the proxy first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        accountStatus.setText("Checking femboy.email:730...");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final JSONObject result = requestLocal("/api/yt2009/login/status", "GET");
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            boolean authorized = result.optBoolean("authorized", false);
+                            int count = result.optInt("accountCount", 0);
+                            String selected = result.optString("selectedAccount", "");
+                            if (authorized) {
+                                String label = "Account linked · " + count + " channel(s)";
+                                if (selected.length() > 0) label += " · selected: " + selected;
+                                accountStatus.setText(label);
+                                if (openPicker) {
+                                    String picker = result.optString("pickerUrl", lastPickerUrl);
+                                    if (picker.length() > 0) {
+                                        try {
+                                            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(picker)));
+                                        } catch (Exception e) {
+                                            showMessage("Channel picker", "Could not open browser: " + e.getMessage());
+                                        }
+                                    } else {
+                                        showMessage("Channel picker", "No account picker URL is available.");
+                                    }
+                                } else {
+                                    Toast.makeText(MainActivity.this, "yt2009 account found", Toast.LENGTH_SHORT).show();
+                                }
+                            } else {
+                                accountStatus.setText("Account: waiting for Google sign-in");
+                                String error = result.optString("error", result.optString("message", "Not linked yet"));
+                                if (openPicker) {
+                                    showMessage("Account not linked yet", error + "\n\nComplete the sign-in on a PC, then check again.");
+                                } else {
+                                    Toast.makeText(MainActivity.this, error, Toast.LENGTH_LONG).show();
+                                }
+                            }
+                        }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            accountStatus.setText("Account: status check failed");
+                            showMessage("yt2009 status", e.getMessage());
+                        }
+                    });
+                }
+            }
+        }, "yt2009-login-status").start();
+    }
+
+    private JSONObject requestLocal(String path, String method) throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL("http://127.0.0.1:8080" + path);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod(method);
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(15000);
+            connection.setUseCaches(false);
+            connection.setRequestProperty("Accept", "application/json");
+            if ("POST".equals(method)) {
+                connection.setDoOutput(true);
+                OutputStream output = connection.getOutputStream();
+                output.flush();
+                output.close();
+            }
+
+            int status = connection.getResponseCode();
+            InputStream input = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            StringBuilder body = new StringBuilder();
+            if (input != null) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(input, "UTF-8"));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (body.length() + line.length() > 256 * 1024)
+                        throw new java.io.IOException("Local response too large");
+                    body.append(line);
+                }
+                reader.close();
+            }
+            if (status < 200 || status >= 300) {
+                throw new java.io.IOException("Local proxy HTTP " + status + ": " + body.toString());
+            }
+            return new JSONObject(body.toString());
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private void showMessage(String title, String message) {
+        new AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message == null ? "Unknown error" : message)
+            .setPositiveButton("OK", null)
+            .show();
+    }
+
+    @SuppressWarnings("deprecation")
+    private void copyText(String value) {
+        if (Build.VERSION.SDK_INT >= 11) {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("ytlegacy", value));
+        } else {
+            android.text.ClipboardManager clipboard =
+                (android.text.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard != null) clipboard.setText(value);
+        }
+    }
+
+    private void addButton(LinearLayout parent, Button button, float density) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.bottomMargin = (int) (7 * density + 0.5f);
+        parent.addView(button, params);
     }
 
     private boolean isServiceRunning() {
