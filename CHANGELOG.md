@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.14] - 2026-11-20
+
+### Changed
+- Made yt2009 account linking explicitly optional in the Android UI and documentation. Public search, discovery feeds, channel/video metadata, and playback continue to use public providers without an account.
+- Kept personalized yt2009 recommendations as an opt-in enhancement only; the account device identifier remains restricted to the pinned upstream instance.
+- Updated the proxy, foreground notification, Android package, CI artifact, and manual APK build metadata to version 1.14.
+
+### Fixed
+- Handled unavailable yt2009 failover connections without null dereferences in metadata and streaming requests.
+- Closed yt2009 metadata connections and bounded the negative stream cache.
+- Limited discovered yt2009 fallback instances to HTTPS and bounded/closed the instance-list response.
+- Closed upstream image/video connections when responses finish, and rejected malformed or oversized image responses.
+- Validated video IDs before building feeds and made relative-time/duration parsing robust against malformed upstream values.
+- Escaped dynamic values in generated Atom XML and preserved actual video categories in feed entries.
+
+### Verification
+- GitHub Actions Android build is run for this branch; physical-device playback and upstream-provider availability still require device testing.
+- The legacy upstream gsign token handoff remains a third-party HTTP flow. No browser interception or automatic token extraction has been added.
+
 All notable changes recorded here are for the releases updated during the current maintenance work. Dates use YYYY-MM-DD.
 
 ## [1.13] - 2026-11-20
