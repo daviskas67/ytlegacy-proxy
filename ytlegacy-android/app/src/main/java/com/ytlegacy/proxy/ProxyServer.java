@@ -164,8 +164,9 @@ public class ProxyServer extends NanoHTTPD {
                     try { max = Integer.parseInt(session.getParms().get("maxResults")); }
                     catch (Exception ignored) {}
                     max = Math.max(1, Math.min(max, 50));
-                    JsonArray trending = invidious.trending();
-                    if (trending == null || trending.size() == 0) trending = piped.trending();
+                    JsonArray trending = invidious.trendingForFeed();
+                    if (trending == null || trending.size() == 0)
+                        trending = piped.trendingForFeed();
                     return protobuf(YouTubeV3Proto.activities(trending, max));
                 }
                 if (uri.startsWith("/youtube/v3/videos")) {
