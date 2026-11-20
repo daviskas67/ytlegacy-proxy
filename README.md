@@ -172,7 +172,7 @@ gradle --no-daemon :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.13-debug` (доступен 14 дней) и публикует v1.13 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
+GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.14-debug` (доступен 14 дней) и публикует v1.14 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.14).
 
 Сборка v1.14 прошла успешно: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
 
@@ -355,7 +355,7 @@ The Android project is located in `ytlegacy-android/`.
 
 - JDK 17
 - Android SDK Platform 30
-- Android Build Tools 29.0.3
+- Android Build Tools 30.0.3
 - Android Gradle Plugin 7.4.2
 - Gradle 7.5.1
 
@@ -372,7 +372,7 @@ The APK is generated at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.14-debug` artifact (available for 14 days) and publishes the v1.14 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
+GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.14-debug` artifact (available for 14 days) and publishes the v1.14 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.14).
 
 The v1.14 build passed: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
 
