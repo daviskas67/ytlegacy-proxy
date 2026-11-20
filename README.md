@@ -25,6 +25,10 @@
 - В приложении появилась настройка качества: 360p (по умолчанию), 480p, 720p или Auto (лучшее до 720p). Настройка сохраняется локально; параметр `?quality=...` в запросе имеет приоритет.
 - Старый GData XML теперь объявляет фактические `itag`, ширину и высоту выбранного потока вместо жёстко заданного itag 18.
 - Диагностика `/api/video/{id}` показывает `itag`, разрешение и наличие пригодного потока.
+- Плеер использует общий порядок Invidious → Piped → yt2009 instance pool → InnerTube; результат выбранного провайдера отображается в `/api/sources`.
+- yt2009 `fmt_stream_map` больше не переписывает внутренний адрес на фиксированный `femboy.email`: он привязывается к instance, который вернул метаданные, затем пробует остальные configured HTTPS instances.
+- Piped `/streams/{id}` добавлен в playback; принимаются только цельные H.264 MP4 с `videoOnly=false` и media URL на origin из `proxyUrl`.
+- Проверки `Range`, `206 Partial Content` и `416 Range Not Satisfiable` сохранены для всех playback-провайдеров.
 
 ### Next version — in development
 
@@ -36,6 +40,10 @@
 - Added an in-app quality setting: 360p (default), 480p, 720p, or Auto (best up to 720p). The choice is stored locally; an explicit `?quality=...` request parameter overrides it.
 - Legacy GData XML now advertises the selected stream's actual `itag`, width, and height instead of hardcoding itag 18.
 - `/api/video/{id}` diagnostics now include `itag`, resolution, and whether a playable stream is available.
+- The player uses a shared Invidious → Piped → yt2009 instance pool → InnerTube fallback chain; the selected provider is recorded in `/api/sources`.
+- yt2009 `fmt_stream_map` URLs are no longer rewritten to a fixed `femboy.email` host. Internal links resolve to the instance that returned the metadata first, then fall back across the configured HTTPS instance pool.
+- Piped `/streams/{id}` is now a playback source; only complete H.264 MP4 entries with `videoOnly=false` and media URLs on the response's advertised `proxyUrl` origin are accepted.
+- `Range`, `206 Partial Content`, and `416 Range Not Satisfiable` are preserved across playback providers.
 
 ### v1.13
 
@@ -97,8 +105,8 @@
 - **Invidious — основной источник данных.** При запуске прокси параллельно проверяет настроенные экземпляры и измеряет задержку непосредственно с устройства.
 - **Динамический выбор сервера.** Запросы сначала отправляются на самый быстрый доступный экземпляр. Медленные, недоступные, ограничивающие запросы или возвращающие серверные ошибки экземпляры временно пропускаются. Проверка серверов повторяется периодически.
 - **Поддержка основных разделов YouTube.** Поиск, информация о видео, похожие ролики, плейлисты, популярные видео, каналы, загрузки и комментарии используют Invidious в первую очередь.
-- **Воспроизведение видео.** Настраиваемое качество 360p–720p; для старого клиента выбирается цельный progressive MP4 с H.264 + AAC. Byte-range запросы передаются для перемотки.
-- **Резервные источники.** Piped используется для публичного поиска и трендов, когда Invidious не вернул данные. yt2009 и InnerTube остаются последующими резервами для существующих legacy-маршрутов и потоков.
+- **Воспроизведение видео.** Настраиваемое качество 360p–720p; единый fallback: Invidious-пул → Piped-пул → пул yt2009 community-инстансов → InnerTube. Выбираются только цельные progressive MP4 с H.264 + AAC; byte-range перемотка поддерживается.
+- **Резервные источники.** Piped используется для публичного поиска, трендов и воспроизведения. yt2009 работает через пул community-инстансов: сначала проверяется сервер, вернувший `get_video_info`, затем остальные доступные экземпляры. InnerTube остаётся последним публичным резервом.
 - **Диагностика.** Локальные API показывают состояние сервера, выбранные экземпляры Invidious/Piped, задержки и статистику кэша.
 
 ### Пулы Invidious и Piped
@@ -109,7 +117,7 @@
 
 Дополнительные пользовательские инстансы не являются рекомендацией или проверкой их безопасности. В официальной документации Invidious отдельно предупреждают, что публичные инстансы вне её списка следует считать недоверенными. Не используй случайные публичные инстансы для передачи личных данных или авторизационных токенов.
 
-Piped сейчас служит только резервом для публичного поиска и трендовых лент. Его proxy-адреса не используются для авторизации или воспроизведения видео в этой версии.
+Piped используется для публичного поиска, трендов и воспроизведения. Для плеера вызывается `/streams/{id}` через здоровые API-инстансы; выбирается только `MPEG_4` с H.264 и `videoOnly=false`. URL потока разрешается только на HTTPS-origin, указанном самим ответом в `proxyUrl`. Входные данные и авторизационные заголовки в Piped не отправляются.
 
 ### Авторизация аккаунта
 
@@ -134,7 +142,7 @@ Piped сейчас служит только резервом для публи�
 | `/api/status` | Состояние сервиса |
 | `/api/invidious` | Состояние каждого Invidious-экземпляра, задержка, ошибки и выбранный сервер |
 | `/api/piped` | Состояние каждого Piped API-инстанса и задержки |
-| `/api/sources` | Статистика выбора источников: успехи, пустые ответы, ошибки и задержки |
+| `/api/sources` | Статистика источников поиска, трендов и playback: успехи, пустые ответы, ошибки и задержки |
 | `/api/yt2009/login/status` | Состояние привязки yt2009 и список каналов |
 | `/api/cache` | Статистика локального кэша |
 | `/api/video/{id}` | Метаданные, выбранный itag/разрешение и наличие совместимого потока |
@@ -299,8 +307,8 @@ The proxy starts a local HTTP server at `127.0.0.1:8080`. The client communicate
 - **Invidious as the primary provider.** At startup, the proxy probes the configured instances in parallel and measures latency directly from the Android device.
 - **Dynamic server selection.** Requests are routed to the fastest healthy instance. Slow, unavailable, rate-limited, or server-error instances are temporarily skipped; health checks run periodically.
 - **Legacy YouTube features.** Search, video metadata, related videos, playlists, trending feeds, channel pages, uploads, and comments use Invidious first.
-- **Video playback.** Selectable 360p–720p quality, with a single progressive H.264 + AAC MP4 for the legacy player. Byte-range requests are forwarded for seeking.
-- **Fallback providers.** Piped supplies public search and trending data when Invidious cannot. yt2009 and InnerTube remain later fallbacks for existing legacy routes and streams.
+- **Video playback.** Selectable 360p–720p quality and a shared fallback chain: Invidious pool → Piped pool → yt2009 community-instance pool → InnerTube. Only complete progressive H.264 + AAC MP4 streams are selected; byte-range seeking is supported.
+- **Fallback providers.** Piped supplies public search, trending, and playback when Invidious cannot provide a stream. yt2009 uses its community-instance pool: the instance that returned `get_video_info` is tried first, followed by other available instances. InnerTube remains the final public fallback.
 - **Diagnostics.** Local endpoints expose proxy status, Invidious/Piped instance health, selected servers, latency, and cache statistics.
 
 ### Invidious and Piped pools
@@ -311,7 +319,7 @@ All health checks run directly from the device. Invidious is validated through `
 
 The additional community hosts are candidates, not endorsements or security reviews. Invidious documentation explicitly warns that public instances outside its list should be considered untrusted. Do not send personal data or account authorization tokens to random public instances.
 
-Piped is currently used only as a fallback for public search and trending feeds. Its proxy URLs are not used for account authorization or video playback in this version.
+Piped is used for public search, trending, and video playback. The player calls `/streams/{id}` through the healthy API-instance pool and selects only `MPEG_4` H.264 streams with `videoOnly=false`. A media URL is accepted only when it matches the HTTPS origin advertised by the response's `proxyUrl`. No account credentials or authorization headers are sent to Piped.
 
 ### Account authorization
 
@@ -336,7 +344,7 @@ After the service starts, open the relevant endpoint on the device:
 | `/api/status` | Service status |
 | `/api/invidious` | Per-instance health, latency, failures, and selected server |
 | `/api/piped` | Per-instance Piped API health and latency |
-| `/api/sources` | Source routing statistics: successes, empty responses, failures, and latency |
+| `/api/sources` | Search, trending, and playback source statistics: successes, empty responses, failures, and latency |
 | `/api/yt2009/login/status` | yt2009 account-link status and available channels |
 | `/api/cache` | Local cache statistics |
 | `/api/video/{id}` | Video metadata, selected itag/resolution, and playable-stream availability |
