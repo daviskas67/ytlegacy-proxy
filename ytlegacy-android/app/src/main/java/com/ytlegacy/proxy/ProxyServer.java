@@ -21,7 +21,7 @@ public class ProxyServer extends NanoHTTPD {
     private static final String DEVICE_KEY = "XqWdDlb37csu+WU5qX2zR3y3gamS4ITVnK+r0looTM0=";
     private static final String LOCAL_BASE = "http://127.0.0.1:8080";
 
-    private static final String VERSION = "1.11";
+    private static final String VERSION = "1.14";
     private final InvidiousClient invidious = new InvidiousClient();
     private final PipedClient piped = new PipedClient();
     private final Yt2009Client yt2009 = new Yt2009Client();
@@ -592,8 +592,8 @@ public class ProxyServer extends NanoHTTPD {
                 String x = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
                     "<entry xmlns=\"http://www.w3.org/2005/Atom\" " +
                     "xmlns:yt=\"http://gdata.youtube.com/schemas/2007\">" +
-                    "<id>tag:youtube.com,2008:partner:" + user + ":branding</id>" +
-                    "<title>Branding for " + user + "</title>" +
+                    "<id>tag:youtube.com,2008:partner:" + xmlEscape(user) + ":branding</id>" +
+                    "<title>Branding for " + xmlEscape(user) + "</title>" +
                     "</entry>";
                 return xml(x);
             }
@@ -677,8 +677,8 @@ public class ProxyServer extends NanoHTTPD {
                     }
                     Log.i(TAG, "THUMB: " + vid + "/" + cdnName);
                     String[] tries = {
-                        "http://img.youtube.com/vi/" + vid + "/" + cdnName + ".jpg",
-                        "http://img.youtube.com/vi/" + vid + "/hqdefault.jpg"
+                        "https://img.youtube.com/vi/" + vid + "/" + cdnName + ".jpg",
+                        "https://img.youtube.com/vi/" + vid + "/hqdefault.jpg"
                     };
                     for (String upstream : tries) {
                         Response r = proxyImage(upstream);
@@ -905,25 +905,46 @@ public class ProxyServer extends NanoHTTPD {
     }
 
     private Response buildStreamResponse(java.net.HttpURLConnection yc) {
+        boolean handedOff = false;
         try {
             int code = yc.getResponseCode();
-            String ct = yc.getContentType();
-            if (ct == null) ct = "video/mp4";
-            long len = yc.getContentLength();
-            java.io.InputStream is = yc.getInputStream();
-            Response.Status st = (code == 206) ? Response.Status.PARTIAL_CONTENT : Response.Status.OK;
-            Response r = (len > 0)
-                ? newFixedLengthResponse(st, ct, is, len)
-                : newChunkedResponse(st, ct, is);
-            String cr = yc.getHeaderField("Content-Range");
-            if (cr != null) r.addHeader("Content-Range", cr);
-            String ar = yc.getHeaderField("Accept-Ranges");
-            r.addHeader("Accept-Ranges", ar != null ? ar : "bytes");
-            return r;
+            if (code != HttpURLConnection.HTTP_OK && code != HttpURLConnection.HTTP_PARTIAL) {
+                return text(Response.Status.INTERNAL_ERROR, "yt2009 stream HTTP " + code);
+            }
+            String contentType = yc.getContentType();
+            if (contentType == null) contentType = "video/mp4";
+            int length = yc.getContentLength();
+            java.io.InputStream input = disconnectingStream(yc, yc.getInputStream());
+            Response.Status status = code == HttpURLConnection.HTTP_PARTIAL
+                ? Response.Status.PARTIAL_CONTENT : Response.Status.OK;
+            Response response = length >= 0
+                ? newFixedLengthResponse(status, contentType, input, length)
+                : newChunkedResponse(status, contentType, input);
+            String contentRange = yc.getHeaderField("Content-Range");
+            if (contentRange != null) response.addHeader("Content-Range", contentRange);
+            String acceptRanges = yc.getHeaderField("Accept-Ranges");
+            response.addHeader("Accept-Ranges", acceptRanges != null ? acceptRanges : "bytes");
+            handedOff = true;
+            return response;
         } catch (Exception e) {
-            Log.e(TAG, "buildStreamResponse error: " + e);
-            return text(Response.Status.INTERNAL_ERROR, "stream err");
+            Log.e(TAG, "buildStreamResponse error: " + e.getMessage(), e);
+            return text(Response.Status.INTERNAL_ERROR, "stream unavailable");
+        } finally {
+            if (!handedOff) yc.disconnect();
         }
+    }
+
+    private static java.io.InputStream disconnectingStream(
+            final HttpURLConnection connection, java.io.InputStream input) {
+        return new java.io.FilterInputStream(input) {
+            private boolean closed;
+            @Override public void close() throws IOException {
+                if (closed) return;
+                closed = true;
+                try { super.close(); }
+                finally { connection.disconnect(); }
+            }
+        };
     }
 
     private Response handleChannelImage(String cid, String tagName, String redirectFallback) {
@@ -1070,75 +1091,115 @@ public class ProxyServer extends NanoHTTPD {
         return text(Response.Status.NOT_FOUND, "img all failed");
     }
 
-    private Response proxyImageTry(String url) {
+    private Response proxyImageTry(String rawUrl) {
+        HttpURLConnection connection = null;
+        boolean handedOff = false;
         try {
-            java.net.URL u = new java.net.URL(url);
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) u.openConnection();
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(15000);
-            conn.setRequestProperty("User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
-            conn.setRequestProperty("Accept", "image/*,*/*;q=0.8");
-            conn.setInstanceFollowRedirects(true);
-            int code = conn.getResponseCode();
-            if (code != 200) {
-                Log.d(TAG, "proxyImageTry " + code + " for " + url);
-                conn.disconnect();
+            java.net.URL url = new java.net.URL(rawUrl);
+            String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
+            boolean allowedHost = host.equals("img.youtube.com")
+                || host.endsWith(".ytimg.com") || host.equals("ytimg.com")
+                || host.endsWith(".ggpht.com") || host.equals("ggpht.com")
+                || host.endsWith(".googleusercontent.com") || host.equals("googleusercontent.com");
+            if (!"https".equalsIgnoreCase(url.getProtocol()) || !allowedHost) {
+                Log.w(TAG, "Rejected image URL outside HTTPS image allowlist: " + rawUrl);
                 return null;
             }
-            String ct = conn.getContentType();
-            if (ct == null) ct = "image/jpeg";
-            long len = conn.getContentLength();
-            java.io.InputStream is = conn.getInputStream();
-            Response resp = (len > 0)
-                ? newFixedLengthResponse(Response.Status.OK, ct, is, len)
-                : newChunkedResponse(Response.Status.OK, ct, is);
-            resp.addHeader("Cache-Control", "max-age=86400");
-            Log.i(TAG, "IMG OK: " + url + " (" + len + "b)");
-            return resp;
-        } catch (java.net.UnknownHostException dns) {
-            Log.w(TAG, "IMG DNS fail: " + url);
-            return null;
+
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(15000);
+            connection.setRequestProperty("User-Agent",
+                "Mozilla/5.0 (Linux; Android 4.4) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("Accept", "image/*,*/*;q=0.8");
+            connection.setInstanceFollowRedirects(true);
+            int code = connection.getResponseCode();
+            if (code != HttpURLConnection.HTTP_OK) return null;
+
+            String contentType = connection.getContentType();
+            if (contentType == null || !contentType.toLowerCase(java.util.Locale.US).startsWith("image/")) {
+                Log.w(TAG, "Rejected non-image response from " + rawUrl + ": " + contentType);
+                return null;
+            }
+            int length = connection.getContentLength();
+            if (length > 16 * 1024 * 1024) {
+                Log.w(TAG, "Rejected oversized image response: " + length);
+                return null;
+            }
+
+            java.io.InputStream input = disconnectingStream(connection, connection.getInputStream());
+            Response response = length >= 0
+                ? newFixedLengthResponse(Response.Status.OK, contentType, input, length)
+                : newChunkedResponse(Response.Status.OK, contentType, input);
+            response.addHeader("Cache-Control", "public, max-age=86400");
+            handedOff = true;
+            Log.i(TAG, "IMG OK: " + rawUrl + " (" + length + "b)");
+            return response;
         } catch (Exception e) {
-            Log.w(TAG, "IMG err: " + url + " -> " + e.getClass().getSimpleName());
+            Log.w(TAG, "IMG err: " + rawUrl + " -> " + e.getClass().getSimpleName());
             return null;
+        } finally {
+            if (!handedOff && connection != null) connection.disconnect();
         }
     }
 
-    private Response proxyVideo(String url, IHTTPSession session) {
+    private Response proxyVideo(String rawUrl, IHTTPSession session) {
+        HttpURLConnection connection = null;
+        boolean handedOff = false;
         try {
-            java.net.URL u = new java.net.URL(url);
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) u.openConnection();
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(60000);
-            conn.setRequestProperty("User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
-            conn.setInstanceFollowRedirects(true);
-            String range = session.getHeaders().get("range");
-            if (range != null) conn.setRequestProperty("Range", range);
-            int code = conn.getResponseCode();
-            Response.Status st;
-            if (code == 206) st = Response.Status.PARTIAL_CONTENT;
-            else if (code == 200) st = Response.Status.OK;
-            else if (code == 416) return text(Response.Status.RANGE_NOT_SATISFIABLE, "Range");
-            else return text(Response.Status.INTERNAL_ERROR, "upstream " + code);
-            String ct = conn.getContentType();
-            if (ct == null) ct = "video/mp4";
-            long len = conn.getContentLength();
-            java.io.InputStream is = conn.getInputStream();
-            Response r = (len >= 0)
-                ? newFixedLengthResponse(st, ct, is, len)
-                : newChunkedResponse(st, ct, is);
-            String cr = conn.getHeaderField("Content-Range");
-            if (cr != null) r.addHeader("Content-Range", cr);
-            String ar = conn.getHeaderField("Accept-Ranges");
-            r.addHeader("Accept-Ranges", ar != null ? ar : "bytes");
-            return r;
+            java.net.URL url = new java.net.URL(rawUrl);
+            String host = url.getHost() == null ? "" : url.getHost().toLowerCase(java.util.Locale.US);
+            boolean googleVideo = host.equals("googlevideo.com") || host.endsWith(".googlevideo.com");
+            if (!"https".equalsIgnoreCase(url.getProtocol())
+                    || (!googleVideo && !invidious.isTrustedStreamUrl(rawUrl))) {
+                Log.w(TAG, "Rejected untrusted video URL: " + rawUrl);
+                return text(Response.Status.INTERNAL_ERROR, "untrusted video host");
+            }
+
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(60000);
+            connection.setRequestProperty("User-Agent",
+                "com.google.android.youtube/5.0.21 (Linux; U; Android 4.4.2; en_US)");
+            connection.setInstanceFollowRedirects(true);
+            if (session != null && session.getHeaders() != null) {
+                String range = session.getHeaders().get("range");
+                if (range != null) connection.setRequestProperty("Range", range);
+            }
+
+            int code = connection.getResponseCode();
+            Response.Status status;
+            if (code == HttpURLConnection.HTTP_PARTIAL) status = Response.Status.PARTIAL_CONTENT;
+            else if (code == HttpURLConnection.HTTP_OK) status = Response.Status.OK;
+            else if (code == 416) {
+                Response response = text(Response.Status.RANGE_NOT_SATISFIABLE, "Range Not Satisfiable");
+                String contentRange = connection.getHeaderField("Content-Range");
+                if (contentRange != null) response.addHeader("Content-Range", contentRange);
+                response.addHeader("Accept-Ranges", "bytes");
+                return response;
+            } else {
+                Log.w(TAG, "Video upstream returned HTTP " + code);
+                return text(Response.Status.INTERNAL_ERROR, "video upstream HTTP " + code);
+            }
+
+            String contentType = connection.getContentType();
+            if (contentType == null) contentType = "video/mp4";
+            int length = connection.getContentLength();
+            java.io.InputStream input = disconnectingStream(connection, connection.getInputStream());
+            Response response = length >= 0
+                ? newFixedLengthResponse(status, contentType, input, length)
+                : newChunkedResponse(status, contentType, input);
+            String contentRange = connection.getHeaderField("Content-Range");
+            if (contentRange != null) response.addHeader("Content-Range", contentRange);
+            String acceptRanges = connection.getHeaderField("Accept-Ranges");
+            response.addHeader("Accept-Ranges", acceptRanges != null ? acceptRanges : "bytes");
+            handedOff = true;
+            return response;
         } catch (Exception e) {
-            Log.e(TAG, "proxyVideo error: " + e);
-            return text(Response.Status.INTERNAL_ERROR, "proxy: " + e.getMessage());
+            Log.e(TAG, "proxyVideo error: " + e.getMessage(), e);
+            return text(Response.Status.INTERNAL_ERROR, "video stream unavailable");
+        } finally {
+            if (!handedOff && connection != null) connection.disconnect();
         }
     }
 
@@ -1216,6 +1277,18 @@ public class ProxyServer extends NanoHTTPD {
         return result.toString();
     }
 
+    private static String xmlEscape(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace("\"", "&quot;")
+            .replace("'", "&apos;");
+    }
+
+    private static String urlEncode(String value) {
+        try { return URLEncoder.encode(value == null ? "" : value, "UTF-8"); }
+        catch (Exception ignored) { return ""; }
+    }
+
     private static String stripQuery(String s) {
         int q = s.indexOf('?');
         return q >= 0 ? s.substring(0, q) : s;
@@ -1234,6 +1307,7 @@ public class ProxyServer extends NanoHTTPD {
         status.add("piped", piped.getStatus());
 
         JsonObject account = new JsonObject();
+        account.addProperty("optional", true);
         account.addProperty("instance", Yt2009AccountManager.INSTANCE);
         account.addProperty("deviceConfigured", yt2009Account.getDeviceId() != null);
         account.addProperty("authorized", yt2009Account.isAuthorized());
@@ -1256,7 +1330,8 @@ public class ProxyServer extends NanoHTTPD {
         JsonArray features = new JsonArray();
         features.add(new com.google.gson.JsonPrimitive("invidious-primary-fastest-first"));
         features.add(new com.google.gson.JsonPrimitive("piped-secondary-read-only"));
-        features.add(new com.google.gson.JsonPrimitive("yt2009-gsign-personalized-feed"));
+        features.add(new com.google.gson.JsonPrimitive("public-feeds-no-login"));
+        features.add(new com.google.gson.JsonPrimitive("yt2009-gsign-personalized-feed-optional"));
         features.add(new com.google.gson.JsonPrimitive("yt2009-last-resort"));
         features.add(new com.google.gson.JsonPrimitive("search-suggestions"));
         features.add(new com.google.gson.JsonPrimitive("playlist-feeds"));
