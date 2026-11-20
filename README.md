@@ -3,7 +3,7 @@
 **A local compatibility proxy for the legacy YouTube 5.0.21 Android client.**  
 **Локальный прокси совместимости для старого Android-клиента YouTube 5.0.21.**
 
-[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.7)
+[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9)
 
 ---
 
@@ -246,7 +246,7 @@ The APK is generated at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.9-debug` artifact (available for 14 days) and publishes the v1.7 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.7).
+GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.9-debug` artifact (available for 14 days) and publishes the v1.9 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9).
 
 The optional `build-manual.sh` script is intended for environments that already provide Android SDK tools, D8, Gson 2.2.4, and NanoHTTPD 2.3.1 JARs.
 
