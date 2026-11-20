@@ -3,7 +3,7 @@
 **A local compatibility proxy for the legacy YouTube 5.0.21 Android client.**  
 **Локальный прокси совместимости для старого Android-клиента YouTube 5.0.21.**
 
-[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9)
+[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10)
 
 ---
 
@@ -11,9 +11,18 @@
 
 ## Русский
 
-> 🎉 **ytlegacy-proxy v1.9 уже вышел!**  
-> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9). В этом выпуске прокси получил поддержку protobuf-ответов для нескольких ключевых запросов старого YouTube-клиента, а имя приложения стало просто `ytlegacy-proxy`.
+> 🎉 **ytlegacy-proxy v1.10 уже вышел!**  
+> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10). В этом выпуске добавлены большие HTTPS-пулы Invidious и Piped, а Piped подключён как резервный источник поиска и популярных видео.
 
+
+### v1.10
+
+- Добавлены 44 пользовательских кандидата Invidious поверх четырёх экземпляров, перечисленных в официальной документации. Каждый кандидат проверяется через `/api/v1/stats`.
+- Проверка большого пула ограничена шестью параллельными потоками, чтобы не создавать десятки соединений на старых Android-устройствах.
+- Добавлен отдельный пул Piped: 15 адресов из актуальной документации и 14 дополнительных кандидатов.
+- Piped подключён как резервный источник публичного поиска и trending-лент; его ответы переводятся в общую модель видео.
+- Добавлены диагностика `/api/piped` и объединённый статус источников в `/health`.
+- Кандидаты, переданные как HTTP, проверяются только по HTTPS. Если HTTPS не работает или сервер не отдаёт ожидаемый API-ответ, он пропускается.
 
 ### v1.9
 
@@ -26,7 +35,7 @@
 
 - Реальные аватары каналов загружаются из Invidious; перед переходом к заглушке проверяются доступные размеры изображения.
 - Rick Astley удалён из резервных изображений. Вместо него используется нейтральная иконка профиля.
-- Пустая лента подписок для неавторизованного клиента заполняется популярными видео из Invidious.
+- Публичная лента для неавторизованного клиента заполняется популярными видео из Invidious или Piped.
 
 ### О проекте
 
@@ -40,21 +49,22 @@
 - **Динамический выбор сервера.** Запросы сначала отправляются на самый быстрый доступный экземпляр. Медленные, недоступные, ограничивающие запросы или возвращающие серверные ошибки экземпляры временно пропускаются. Проверка серверов повторяется периодически.
 - **Поддержка основных разделов YouTube.** Поиск, информация о видео, похожие ролики, плейлисты, популярные видео, каналы, загрузки и комментарии используют Invidious в первую очередь.
 - **Воспроизведение видео.** Прокси обрабатывает progressive MP4-потоки и передаёт byte-range запросы, необходимые для перемотки.
-- **Резервные источники.** yt2009 используется только тогда, когда среди экземпляров Invidious нет доступных. InnerTube остаётся дополнительным резервом, когда доступный основной источник не может предоставить конкретный поток или ленту.
-- **Диагностика.** Локальные API показывают состояние сервера, выбранный экземпляр Invidious, задержки и статистику кэша.
+- **Резервные источники.** Piped используется для публичного поиска и трендов, когда Invidious не вернул данные. yt2009 и InnerTube остаются последующими резервами для существующих legacy-маршрутов и потоков.
+- **Диагностика.** Локальные API показывают состояние сервера, выбранные экземпляры Invidious/Piped, задержки и статистику кэша.
 
-### Пул Invidious
+### Пулы Invidious и Piped
 
-Сейчас клиент проверяет четыре настроенных экземпляра:
+Для Invidious клиент проверяет четыре экземпляра из [официального списка](https://docs.invidious.io/instances/) и 44 дополнительных пользовательских кандидата. Для Piped используется 15 API-адресов из [документации публичных экземпляров](https://docs.piped.video/docs/public-instances/) и 14 дополнительных кандидатов.
 
-| Экземпляр | Адрес |
-| --- | --- |
-| nerdvpn | [invidious.nerdvpn.de](https://invidious.nerdvpn.de) |
-| tiekoetter | [invidious.tiekoetter.com](https://invidious.tiekoetter.com) |
-| chocolatemoo53 | [yt.chocolatemoo53.com](https://yt.chocolatemoo53.com) |
-| nadeko | [inv.nadeko.net](https://inv.nadeko.net) |
+Все адреса проверяются непосредственно с устройства. Проверка Invidious использует `/api/v1/stats`, Piped — `/trending?region=PL`. В обоих пулах максимум шесть проверок выполняются одновременно. Адреса из пользовательского списка были переданы как HTTP, но прокси пробует только HTTPS: неподдерживающие TLS серверы будут отмечены как недоступные.
 
-Порядок выбора определяется замерами с конкретного устройства. Публичные мониторинги могут помочь предварительно оценить доступность серверов, но не гарантируют такую же скорость в каждой сети.
+Дополнительные пользовательские инстансы не являются рекомендацией или проверкой их безопасности. В официальной документации Invidious отдельно предупреждают, что публичные инстансы вне её списка следует считать недоверенными. Не используй случайные публичные инстансы для передачи личных данных или авторизационных токенов.
+
+Piped сейчас служит только резервом для публичного поиска и трендовых лент. Его proxy-адреса не используются для авторизации или воспроизведения видео в этой версии.
+
+### Авторизация аккаунта
+
+В v1.10 вход в Google-аккаунт не реализован. Авторизация `gsign` в upstream yt2009 не является стандартным OAuth-редиректом и требует передачи чувствительных данных авторизации стороннему серверу. Прокси не отправляет Google-токены публичным инстансам Invidious, Piped или yt2009. Поэтому текущая лента остаётся публичной, а не персональной. Безопасная интеграция потребует отдельного OAuth-клиента Google и явной настройки YouTube API.
 
 ### Диагностика
 
@@ -65,6 +75,7 @@
 | `/health` | Общий статус прокси и резервного источника |
 | `/api/status` | Состояние сервиса |
 | `/api/invidious` | Состояние каждого Invidious-экземпляра, задержка, ошибки и выбранный сервер |
+| `/api/piped` | Состояние каждого Piped API-инстанса и задержки |
 | `/api/cache` | Статистика локального кэша |
 | `/api/video/{id}` | Диагностика метаданных конкретного видео |
 
@@ -73,6 +84,7 @@
 - [http://127.0.0.1:8080/health](http://127.0.0.1:8080/health)
 - [http://127.0.0.1:8080/api/status](http://127.0.0.1:8080/api/status)
 - [http://127.0.0.1:8080/api/invidious](http://127.0.0.1:8080/api/invidious)
+- [http://127.0.0.1:8080/api/piped](http://127.0.0.1:8080/api/piped)
 - [http://127.0.0.1:8080/api/cache](http://127.0.0.1:8080/api/cache)
 - [http://127.0.0.1:8080/api/video/VIDEO_ID](http://127.0.0.1:8080/api/video/VIDEO_ID)
 
@@ -107,7 +119,7 @@ gradle --no-daemon :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.9-debug` (доступен 14 дней) и публикует v1.9 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9).
+GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.10-debug` (доступен 14 дней) и публикует v1.10 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10).
 
 Дополнительный скрипт `build-manual.sh` рассчитан на окружения, где уже доступны Android SDK tools, D8, Gson 2.2.4 и NanoHTTPD 2.3.1 JAR-файлы.
 
@@ -160,9 +172,18 @@ Invidious — неофициальный API совместимости. Пуб�
 
 ## English
 
-> 🎉 **ytlegacy-proxy v1.9 is here!**  
-> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9). This release adds protobuf responses for key requests made by the legacy YouTube client, and the Android app is now simply named `ytlegacy-proxy`.
+> 🎉 **ytlegacy-proxy v1.10 is here!**  
+> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10). This release adds HTTPS-only community pools for Invidious and Piped, with Piped serving as a secondary source for search and trending feeds.
 
+
+### v1.10
+
+- Added 44 user-supplied Invidious candidates on top of the four instances listed in the official documentation. Each candidate is validated through `/api/v1/stats`.
+- Bounded large-pool probing to six concurrent workers to avoid creating dozens of connections on older Android devices.
+- Added a separate Piped pool with 15 API endpoints from its current documentation and 14 additional candidates.
+- Integrated Piped as a secondary source for public search and trending feeds, normalizing its responses into the proxy's shared video model.
+- Added the `/api/piped` diagnostics endpoint and combined provider status in `/health`.
+- User-supplied HTTP URLs are tried over HTTPS only. Candidates are skipped when HTTPS or the expected API response is unavailable.
 
 ### v1.9
 
@@ -189,21 +210,22 @@ The proxy starts a local HTTP server at `127.0.0.1:8080`. The client communicate
 - **Dynamic server selection.** Requests are routed to the fastest healthy instance. Slow, unavailable, rate-limited, or server-error instances are temporarily skipped; health checks run periodically.
 - **Legacy YouTube features.** Search, video metadata, related videos, playlists, trending feeds, channel pages, uploads, and comments use Invidious first.
 - **Video playback.** Progressive MP4 streams are supported, including byte-range forwarding for seeking.
-- **Fallback providers.** yt2009 is used only when no Invidious instance is healthy. InnerTube remains an additional fallback when a healthy primary provider cannot supply a particular feed or stream.
-- **Diagnostics.** Local endpoints expose proxy status, Invidious instance health, selected server, latency, and cache statistics.
+- **Fallback providers.** Piped supplies public search and trending data when Invidious cannot. yt2009 and InnerTube remain later fallbacks for existing legacy routes and streams.
+- **Diagnostics.** Local endpoints expose proxy status, Invidious/Piped instance health, selected servers, latency, and cache statistics.
 
-### Invidious pool
+### Invidious and Piped pools
 
-The client currently probes these four configured instances:
+For Invidious, the client checks the four instances in the [official list](https://docs.invidious.io/instances/) plus 44 additional user-supplied candidates. For Piped, it checks 15 API endpoints from the [public instances documentation](https://docs.piped.video/docs/public-instances/) plus 14 additional candidates.
 
-| Instance | Address |
-| --- | --- |
-| nerdvpn | [invidious.nerdvpn.de](https://invidious.nerdvpn.de) |
-| tiekoetter | [invidious.tiekoetter.com](https://invidious.tiekoetter.com) |
-| chocolatemoo53 | [yt.chocolatemoo53.com](https://yt.chocolatemoo53.com) |
-| nadeko | [inv.nadeko.net](https://inv.nadeko.net) |
+All health checks run directly from the device. Invidious is validated through `/api/v1/stats`; Piped is validated through `/trending?region=PL`. Both pools are limited to six concurrent checks. The supplied community URLs used HTTP, but the proxy tries HTTPS only; servers without working TLS are marked unavailable.
 
-The selection order is based on measurements taken from each device. Public monitoring data can help shortlist providers, but it cannot predict performance on every user's network.
+The additional community hosts are candidates, not endorsements or security reviews. Invidious documentation explicitly warns that public instances outside its list should be considered untrusted. Do not send personal data or account authorization tokens to random public instances.
+
+Piped is currently used only as a fallback for public search and trending feeds. Its proxy URLs are not used for account authorization or video playback in this version.
+
+### Account authorization
+
+Google account sign-in is not implemented in v1.10. The upstream yt2009 `gsign` flow is not a standard OAuth redirect and requires handing sensitive authorization material to a third-party server. This proxy does not send Google tokens to public Invidious, Piped, or yt2009 instances. The current feed therefore remains public, not personalized. A safe integration needs a separately configured Google OAuth client and YouTube API access.
 
 ### Diagnostics
 
@@ -214,6 +236,7 @@ After the service starts, open the relevant endpoint on the device:
 | `/health` | Overall proxy and fallback-provider health |
 | `/api/status` | Service status |
 | `/api/invidious` | Per-instance health, latency, failures, and selected server |
+| `/api/piped` | Per-instance Piped API health and latency |
 | `/api/cache` | Local cache statistics |
 | `/api/video/{id}` | Metadata diagnostics for a video |
 
@@ -256,7 +279,7 @@ The APK is generated at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.9-debug` artifact (available for 14 days) and publishes the v1.9 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.9).
+GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.10-debug` artifact (available for 14 days) and publishes the v1.10 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.10).
 
 The optional `build-manual.sh` script is intended for environments that already provide Android SDK tools, D8, Gson 2.2.4, and NanoHTTPD 2.3.1 JARs.
 
