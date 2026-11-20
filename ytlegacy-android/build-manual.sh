@@ -10,8 +10,8 @@ D8_JAR="${D8_JAR:-$BT/lib/d8.jar}"
 
 cd "$PROJ"
 
-VERSION_CODE="$(sed -n 's/^[[:space:]]*versionCode[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' app/build.gradle | head -n 1)"
-VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\\([^"]*\\)".*/\\1/p' app/build.gradle | head -n 1)"
+VERSION_CODE="$(sed -n 's/^[[:space:]]*versionCode[[:space:]]*\([0-9][0-9]*\).*/\1/p' app/build.gradle | head -n 1)"
+VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)".*/\1/p' app/build.gradle | head -n 1)"
 [ -n "$VERSION_CODE" ] || { echo "Could not read versionCode from app/build.gradle"; exit 1; }
 [ -n "$VERSION_NAME" ] || { echo "Could not read versionName from app/build.gradle"; exit 1; }
 
