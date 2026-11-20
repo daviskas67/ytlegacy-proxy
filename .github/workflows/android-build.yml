@@ -42,7 +42,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ytlegacy-proxy-v1.9-debug
+          name: ytlegacy-proxy-v1.10-debug
           path: ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -92,4 +92,21 @@ jobs:
               --target "$GITHUB_SHA" \
               --title "ytlegacy-proxy v1.9" \
               --notes "ytlegacy-proxy v1.9. Fixes legacy YouTube Data API v3 protobuf feed responses and removes the version suffix from the Android app name."
+          fi
+
+      - name: Publish v1.10 GitHub Release
+        if: github.event_name == 'push' && github.event.head_commit.message == 'release v1.10'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk"
+          ASSET="ytlegacy-proxy-v1.10.apk"
+          cp "$APK" "$ASSET"
+          if gh release view v1.10 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.10 "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v1.10 "$ASSET" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "ytlegacy-proxy v1.10" \
+              --notes "ytlegacy-proxy v1.10 adds HTTPS-only community Invidious candidates and a read-only Piped fallback for public search and trending feeds."
           fi
