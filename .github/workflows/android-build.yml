@@ -76,3 +76,20 @@ jobs:
               --title "ytlegacy-proxy v1.7" \
               --generate-notes
           fi
+
+      - name: Publish v1.9 GitHub Release
+        if: github.event_name == 'push' && github.event.head_commit.message == 'release v1.9'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk"
+          ASSET="ytlegacy-proxy-v1.9.apk"
+          cp "$APK" "$ASSET"
+          if gh release view v1.9 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.9 "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v1.9 "$ASSET" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "ytlegacy-proxy v1.9" \
+              --notes "ytlegacy-proxy v1.9. Fixes legacy YouTube Data API v3 protobuf feed responses and removes the version suffix from the Android app name."
+          fi
