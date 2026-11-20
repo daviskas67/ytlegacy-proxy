@@ -150,7 +150,7 @@ public class MainActivity extends Activity {
         layout.addView(accountTitle, accountTitleParams);
 
         accountStatus = new TextView(this);
-        accountStatus.setText("Account: not linked");
+        accountStatus.setText("Public mode · no account required");
         accountStatus.setTextColor(Color.LTGRAY);
         accountStatus.setTextSize(14);
         accountStatus.setGravity(Gravity.CENTER);
@@ -158,6 +158,16 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         accountStatusParams.bottomMargin = (int) (8 * density + 0.5f);
         layout.addView(accountStatus, accountStatusParams);
+
+        TextView accountOptional = new TextView(this);
+        accountOptional.setText("Sign-in is optional. Search, public feeds and video playback work without a Google account. Linking only adds personalized yt2009 recommendations.");
+        accountOptional.setTextColor(Color.LTGRAY);
+        accountOptional.setTextSize(12);
+        accountOptional.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams accountOptionalParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        accountOptionalParams.bottomMargin = (int) (10 * density + 0.5f);
+        layout.addView(accountOptional, accountOptionalParams);
 
         Button loginButton = new Button(this);
         loginButton.setText("Connect Google account");
@@ -380,7 +390,7 @@ public class MainActivity extends Activity {
                             } else if (lastDeviceCode.length() == 7) {
                                 startLoginPolling();
                             } else {
-                                accountStatus.setText("Account: not linked");
+                                accountStatus.setText("Public mode · no account linked");
                             }
                         }
                     });
