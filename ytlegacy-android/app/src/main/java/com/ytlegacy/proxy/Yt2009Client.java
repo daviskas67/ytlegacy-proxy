@@ -501,14 +501,18 @@ public class Yt2009Client {
         return new ArrayList<String>(ordered);
     }
 
-    private boolean isKnownInstanceBase(String base) {
+    private synchronized boolean isKnownInstanceBase(String base) {
         if (base == null) return false;
         try {
             URL candidate = new URL(base);
-            return isKnownInstanceUrl(candidate, base);
-        } catch (Exception ignored) {
-            return false;
-        }
+            if (sameOrigin(candidate, FALLBACK_INSTANCE)) return true;
+            if (availableInstances != null) {
+                for (String configured : availableInstances) {
+                    if (sameOrigin(candidate, configured)) return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
 
     private synchronized boolean isKnownInstanceUrl(URL target, String preferredInstance) {
@@ -517,16 +521,16 @@ public class Yt2009Client {
         if (!"https".equalsIgnoreCase(protocol)
                 && !("http".equalsIgnoreCase(protocol)
                     && "femboy.email".equalsIgnoreCase(target.getHost())
-                    && (target.getPort() == 730))) return false;
+                    && target.getPort() == 730)) return false;
 
-        if (sameOrigin(target, preferredInstance)) return true;
         if (sameOrigin(target, FALLBACK_INSTANCE)) return true;
         if (availableInstances != null) {
             for (String base : availableInstances) {
                 if (sameOrigin(target, base)) return true;
             }
         }
-        return false;
+        return isKnownInstanceBase(preferredInstance)
+            && sameOrigin(target, preferredInstance);
     }
 
     private static boolean isGoogleVideoUrl(URL url) {
