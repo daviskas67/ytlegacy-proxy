@@ -385,8 +385,9 @@ public class Yt2009Client {
                 }
 
                 String contentType = connection.getContentType();
-                if (StreamHttpSupport.isSuccessfulStreamStatus(code)
-                        && StreamHttpSupport.isPlayableContentType(contentType)) {
+                if (StreamHttpSupport.isRangeNotSatisfiable(code)
+                        || (StreamHttpSupport.isSuccessfulStreamStatus(code)
+                            && StreamHttpSupport.isPlayableContentType(contentType))) {
                     HttpURLConnection ready = connection;
                     connection = null;
                     return ready;
