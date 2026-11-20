@@ -20,7 +20,6 @@ import fi.iki.elonen.NanoHTTPD;
 public class Yt2009Client {
     private static final String TAG = "Yt2009";
     private static final String BASE = "http://femboy.email:730";
-    private static final String INTERNAL_HOST = "68.172.220.11:730";
     private static final String LOCAL_BASE = "http://127.0.0.1:8080";
     private final java.util.Map<String, Long> failedVideos = new java.util.concurrent.ConcurrentHashMap<String, Long>();
     private static final long NEG_CACHE_TTL = 60000L;  // 60 сек
@@ -368,7 +367,7 @@ public class Yt2009Client {
 
             String path = Yt2009FormatSelector.pathAndQuery(rawUrl);
             if (path.length() == 0) return null;
-            return openInstanceFormatWithFailover(path, sourceInstance, session);
+            return openInstanceFormatWithFailover(path, originOf(selected), session);
         } catch (Exception e) {
             Log.w(TAG, "yt2009 selected format URL invalid: " + e.getMessage());
             return null;
@@ -798,7 +797,8 @@ public class Yt2009Client {
                 }
 
                 int responseCode = connection.getResponseCode();
-                if (responseCode == 200 || responseCode == 206) return connection;
+                if (StreamHttpSupport.isRangeNotSatisfiable(responseCode)
+                        || StreamHttpSupport.isSuccessfulStreamStatus(responseCode)) return connection;
 
                 if (responseCode == 429 || responseCode >= 500) {
                     synchronized (this) {
