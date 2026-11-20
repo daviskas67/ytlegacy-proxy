@@ -3,13 +3,19 @@ set -e
 
 PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SDK="/usr/lib/android-sdk"
-BT="$SDK/build-tools/29.0.3"
+BT="$SDK/build-tools/30.0.3"
 PLATFORM="$SDK/platforms/android-30"
 ANDROID_JAR="$PLATFORM/android.jar"
-D8_JAR="$PROJ/tools/d8.jar"
+D8_JAR="${D8_JAR:-$BT/lib/d8.jar}"
 
 cd "$PROJ"
 
+VERSION_CODE="$(sed -n 's/^[[:space:]]*versionCode[[:space:]]*\([0-9][0-9]*\).*/\1/p' app/build.gradle | head -n 1)"
+VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)".*/\1/p' app/build.gradle | head -n 1)"
+[ -n "$VERSION_CODE" ] || { echo "Could not read versionCode from app/build.gradle"; exit 1; }
+[ -n "$VERSION_NAME" ] || { echo "Could not read versionName from app/build.gradle"; exit 1; }
+
+echo "Building ytlegacy-proxy v$VERSION_NAME (code $VERSION_CODE)"
 echo "=== 1. Проверка инструментов ==="
 for tool in "$BT/aapt2" "$BT/zipalign" "$BT/apksigner"; do
     [ -f "$tool" ] || { echo "MISSING: $tool"; exit 1; }
@@ -80,8 +86,8 @@ echo "=== 5. Сборка базового APK ==="
     --manifest app/src/main/AndroidManifest.xml \
     --min-sdk-version 8 \
     --target-sdk-version 19 \
-    --version-code 4 \
-    --version-name "1.7" \
+    --version-code "$VERSION_CODE" \
+    --version-name "$VERSION_NAME" \
     -I "$ANDROID_JAR" \
     -R build/manual/res.zip \
     --auto-add-overlay

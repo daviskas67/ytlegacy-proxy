@@ -32,7 +32,7 @@ public class VideoData {
         if (data == null) return null;
         VideoData v = new VideoData();
         v.id = getStr(data, "videoId", "");
-        if (v.id.length() == 0) return null;
+        if (!v.id.matches("[A-Za-z0-9_-]{11}")) return null;
 
         v.title = getStr(data, "title", v.id);
         v.author = getStr(data, "author", "YouTube");
@@ -341,34 +341,55 @@ public class VideoData {
     }
 
     public static int parseDurationToSec(String s) {
-        if (s == null || s.isEmpty() || s.toUpperCase().contains("LIVE")) return 0;
+        if (s == null || s.isEmpty() || s.toUpperCase(java.util.Locale.US).contains("LIVE")) return 0;
         try {
-            String[] p = s.split(":");
-            if (p.length == 3) return Integer.parseInt(p[0])*3600 + Integer.parseInt(p[1])*60 + Integer.parseInt(p[2]);
-            if (p.length == 2) return Integer.parseInt(p[0])*60 + Integer.parseInt(p[1]);
-            if (p.length == 1) return Integer.parseInt(p[0]);
-        } catch (Exception e) {}
-        return 0;
+            String[] parts = s.split(":");
+            long seconds = 0L;
+            if (parts.length == 3) {
+                seconds = Long.parseLong(parts[0]) * 3600L
+                    + Long.parseLong(parts[1]) * 60L + Long.parseLong(parts[2]);
+            } else if (parts.length == 2) {
+                seconds = Long.parseLong(parts[0]) * 60L + Long.parseLong(parts[1]);
+            } else if (parts.length == 1) {
+                seconds = Long.parseLong(parts[0]);
+            } else {
+                return 0;
+            }
+            if (seconds <= 0L) return 0;
+            return (int) Math.min((long) Integer.MAX_VALUE, seconds);
+        } catch (Exception ignored) {
+            return 0;
+        }
     }
 
     public static String parseRelativeTime(String text) {
-        if (text == null) return "2013-01-01T00:00:00.000Z";
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+)\\s+(second|minute|hour|day|week|month|year)s?\\s+ago").matcher(text.toLowerCase());
-        if (!m.find()) return "2013-01-01T00:00:00.000Z";
-        int n = Integer.parseInt(m.group(1));
-        String u = m.group(2);
-        long now = System.currentTimeMillis();
-        long off = 0;
-        if (u.equals("second")) off = n*1000L;
-        else if (u.equals("minute")) off = n*60000L;
-        else if (u.equals("hour")) off = n*3600000L;
-        else if (u.equals("day")) off = n*86400000L;
-        else if (u.equals("week")) off = n*7L*86400000L;
-        else if (u.equals("month")) off = n*30L*86400000L;
-        else if (u.equals("year")) off = n*365L*86400000L;
-        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-        sdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
-        return sdf.format(new java.util.Date(now - off));
+        final String fallback = "2013-01-01T00:00:00.000Z";
+        if (text == null) return fallback;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+            .compile("(\\d+)\\s+(second|minute|hour|day|week|month|year)s?\\s+ago")
+            .matcher(text.toLowerCase(java.util.Locale.US));
+        if (!matcher.find()) return fallback;
+        try {
+            long amount = Math.min(Long.parseLong(matcher.group(1)), 36500L);
+            String unit = matcher.group(2);
+            long unitMs;
+            if ("second".equals(unit)) unitMs = 1000L;
+            else if ("minute".equals(unit)) unitMs = 60000L;
+            else if ("hour".equals(unit)) unitMs = 3600000L;
+            else if ("day".equals(unit)) unitMs = 86400000L;
+            else if ("week".equals(unit)) unitMs = 7L * 86400000L;
+            else if ("month".equals(unit)) unitMs = 30L * 86400000L;
+            else unitMs = 365L * 86400000L;
+
+            long now = System.currentTimeMillis();
+            long offset = amount * unitMs;
+            java.text.SimpleDateFormat format = new java.text.SimpleDateFormat(
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+            format.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            return format.format(new java.util.Date(now - offset));
+        } catch (Exception ignored) {
+            return fallback;
+        }
     }
 
     public static String extractChannelId(JsonObject byline) {

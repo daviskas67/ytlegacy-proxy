@@ -3,7 +3,7 @@
 **A local compatibility proxy for the legacy YouTube 5.0.21 Android client.**  
 **Локальный прокси совместимости для старого Android-клиента YouTube 5.0.21.**
 
-[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13)
+[English](#english) · [Русский](#русский) · [Latest release](https://github.com/daviskas67/ytlegacy-proxy/releases/latest)
 
 ---
 
@@ -90,6 +90,8 @@
 Piped сейчас служит только резервом для публичного поиска и трендовых лент. Его proxy-адреса не используются для авторизации или воспроизведения видео в этой версии.
 
 ### Авторизация аккаунта
+
+**Вход через yt2009 необязателен.** Без него работают публичный поиск, главная/популярная лента, метаданные видео, каналы и воспроизведение через Invidious/Piped/InnerTube. Google-аккаунт подключается только для персональных рекомендаций yt2009. Кнопки входа можно просто не трогать.
 
 Войти можно из главного экрана приложения: **Start Google account sign-in** → завершить upstream-процесс на ПК. Приложение само проверяет статус каждые 5 секунд и предложит открыть **Select YouTube channel**, когда привязка завершится. После этого прокси запрашивает персональную ленту yt2009 для старого клиента.
 
@@ -289,6 +291,8 @@ The additional community hosts are candidates, not endorsements or security revi
 Piped is currently used only as a fallback for public search and trending feeds. Its proxy URLs are not used for account authorization or video playback in this version.
 
 ### Account authorization
+
+**yt2009 sign-in is optional.** Public search, discovery/trending feeds, video metadata, channel pages, and playback work without linking a Google account through Invidious, Piped, and InnerTube. Linking is only used to add personalized yt2009 recommendations; you can simply leave the sign-in controls unused.
 
 From the app's main screen use **Start Google account sign-in**, then complete the upstream flow on a PC. The app checks the status every five seconds and offers to open **Select YouTube channel** once linking is complete. The proxy then requests the personalized yt2009 recommendations feed for the legacy client.
 

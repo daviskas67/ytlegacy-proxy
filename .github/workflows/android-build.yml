@@ -28,7 +28,7 @@ jobs:
           packages: platform-tools
 
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-30" "build-tools;29.0.3"
+        run: sdkmanager "platforms;android-30" "build-tools;30.0.3"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -42,7 +42,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ytlegacy-proxy-v1.13-debug
+          name: ytlegacy-proxy-v1.14-debug
           path: ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -160,4 +160,21 @@ jobs:
               --target "$GITHUB_SHA" \
               --title "ytlegacy-proxy v1.13" \
               --notes "ytlegacy-proxy v1.13 adds a shareable sign-in guide and clearer account/channel status."
+          fi
+
+      - name: Publish v1.14 GitHub Release
+        if: github.event_name == 'push' && github.event.head_commit.message == 'release v1.14'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="ytlegacy-android/app/build/outputs/apk/debug/app-debug.apk"
+          ASSET="ytlegacy-proxy-v1.14.apk"
+          cp "$APK" "$ASSET"
+          if gh release view v1.14 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.14 "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v1.14 "$ASSET" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "ytlegacy-proxy v1.14" \
+              --notes "ytlegacy-proxy v1.14 makes yt2009 account linking optional and fixes proxy stream cleanup and fallback handling."
           fi

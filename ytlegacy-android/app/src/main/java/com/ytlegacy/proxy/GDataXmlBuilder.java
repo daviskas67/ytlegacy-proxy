@@ -145,7 +145,7 @@ public class GDataXmlBuilder {
     }
 
     public static String buildVideoEntryXml(VideoData v) {
-        if (v == null || v.id.isEmpty()) return null;
+        if (v == null || v.id == null || !v.id.matches("[A-Za-z0-9_-]{11}")) return null;
         String keywords = "video";
         if (!v.tags.isEmpty()) {
             StringBuilder kw = new StringBuilder();
@@ -183,7 +183,7 @@ public class GDataXmlBuilder {
             "      <media:title type=\"plain\">" + titleX + "</media:title>\n" +
             "      <media:description type=\"plain\">" + descX + "</media:description>\n" +
             "      <media:keywords>" + keywords + "</media:keywords>\n" +
-            "      <media:category label=\"Music\" scheme=\"http://gdata.youtube.com/schemas/2007/categories.cat\">Music</media:category>\n" +
+            "      <media:category label=\"" + esc(v.category) + "\" scheme=\"http://gdata.youtube.com/schemas/2007/categories.cat\">" + esc(v.category) + "</media:category>\n" +
             "      <media:content url=\"" + BASE + "/video/" + v.id + ".mp4\" type=\"video/mp4\" medium=\"video\" isDefault=\"true\" expression=\"full\" duration=\"" + v.lengthSeconds + "\" yt:format=\"18\" itag=\"18\"/>\n" +
             "      <media:thumbnail url=\"" + BASE + "/vi/" + v.id + "/3.jpg\" height=\"720\" width=\"1280\" time=\"00:00:00.000\" yt:name=\"maxresdefault\"/>\n" +
             "      <media:thumbnail url=\"" + BASE + "/vi/" + v.id + "/0.jpg\" height=\"360\" width=\"480\" time=\"00:00:00.000\" yt:name=\"hqdefault\"/>\n" +
