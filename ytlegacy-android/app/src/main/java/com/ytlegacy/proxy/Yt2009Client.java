@@ -20,7 +20,6 @@ import fi.iki.elonen.NanoHTTPD;
 public class Yt2009Client {
     private static final String TAG = "Yt2009";
     private static final String BASE = "http://femboy.email:730";
-    private static final String INTERNAL_HOST = "68.172.220.11:730";
     private static final String LOCAL_BASE = "http://127.0.0.1:8080";
     private final java.util.Map<String, Long> failedVideos = new java.util.concurrent.ConcurrentHashMap<String, Long>();
     private static final long NEG_CACHE_TTL = 60000L;  // 60 сек
@@ -29,6 +28,7 @@ public class Yt2009Client {
     private int currentInstanceIndex = 0;
     private Map<String, Long> deadInstances = new HashMap<String, Long>();
     private static final long DEAD_TTL = 300000L;
+    private static final int MAX_STREAM_INSTANCE_ATTEMPTS = 4;
     private static final String FALLBACK_INSTANCE = "http://femboy.email:730";
     private static final String INSTANCES_JSON_URL = "http://144.31.189.129/notPipe.json";
     private static final String BROWSER_UA =
@@ -40,6 +40,7 @@ public class Yt2009Client {
         public String author = "";
         public String status = "";
         public int lengthSeconds = 0;
+        public String sourceInstance = "";
         public Map<Integer, String> fmtUrls = new HashMap<>();
     }
 
@@ -55,7 +56,7 @@ public class Yt2009Client {
         c.setRequestProperty("Referer", BASE + "/");
         if (session != null) {
             String range = session.getHeaders().get("range");
-            if (range != null) c.setRequestProperty("Range", range);
+            StreamHttpSupport.applyRangeHeader(c, range);
         }
         return c;
     }
@@ -256,6 +257,7 @@ public class Yt2009Client {
                 Log.w(TAG, "gvi unavailable: no healthy yt2009 instance");
                 return info;
             }
+            info.sourceInstance = originOf(connection.getURL());
             int responseCode = connection.getResponseCode();
             if (responseCode != HttpURLConnection.HTTP_OK) {
                 Log.w(TAG, "gvi HTTP " + responseCode);
@@ -299,12 +301,13 @@ public class Yt2009Client {
             if (pipe <= 0) continue;
             String itagStr = part.substring(0, pipe).trim();
             String url = part.substring(pipe + 1).trim();
-            url = url.replace(INTERNAL_HOST, "femboy.email:730");
             while (url.endsWith("&") || url.endsWith(",")) url = url.substring(0, url.length() - 1);
             try {
                 int itag = Integer.parseInt(itagStr);
-                if (!info.fmtUrls.containsKey(itag)) info.fmtUrls.put(itag, url);
-            } catch (Exception e) { }
+                String normalized = Yt2009FormatSelector.normalizeFormatUrl(url, info.sourceInstance);
+                if (normalized.length() > 0 && !info.fmtUrls.containsKey(itag))
+                    info.fmtUrls.put(itag, normalized);
+            } catch (Exception ignored) { }
         }
     }
 
@@ -313,6 +316,11 @@ public class Yt2009Client {
      * Порядок: exp_hd (MP4 itag 22/37) -> get_480 (FLV itag 35) -> get_video (MP4 itag 5).
      */
     public HttpURLConnection tryStream(String videoId, NanoHTTPD.IHTTPSession session) {
+        return tryStream(videoId, session, null);
+    }
+
+    /** Selects a progressive MP4 matching the requested quality before legacy endpoint fallback. */
+    public HttpURLConnection tryStream(String videoId, NanoHTTPD.IHTTPSession session, String quality) {
         if (videoId == null || !videoId.matches("[A-Za-z0-9_-]{11}")) return null;
 
         long now = System.currentTimeMillis();
@@ -325,6 +333,253 @@ public class Yt2009Client {
             failedVideos.remove(videoId);
         }
 
+        try {
+            Info info = getVideoInfo(videoId);
+            Yt2009FormatSelector.Selection selected =
+                Yt2009FormatSelector.select(info.fmtUrls, quality);
+            if (selected != null) {
+                HttpURLConnection direct = openSelectedFormat(
+                    selected.url, info.sourceInstance, session);
+                if (direct != null) {
+                    failedVideos.remove(videoId);
+                    Log.i(TAG, "yt2009 fmt_stream_map selected itag=" + selected.itag
+                        + " height=" + selected.height + " quality=" + quality);
+                    return direct;
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "yt2009 format-map selection failed: " + e.getMessage());
+        }
+
+        return tryStreamEndpointFallback(videoId, session);
+    }
+
+    private HttpURLConnection openSelectedFormat(
+            String rawUrl, String sourceInstance, NanoHTTPD.IHTTPSession session) {
+        try {
+            URL selected = new URL(rawUrl);
+            if (isGoogleVideoUrl(selected)) {
+                return openSelectedDirect(selected, session, sourceInstance);
+            }
+            if (!isKnownInstanceUrl(selected, sourceInstance)) {
+                Log.w(TAG, "Rejected yt2009 format URL outside the configured instance pool: " + selected);
+                return null;
+            }
+
+            String path = Yt2009FormatSelector.pathAndQuery(rawUrl);
+            if (path.length() == 0) return null;
+            return openInstanceFormatWithFailover(path, originOf(selected), session);
+        } catch (Exception e) {
+            Log.w(TAG, "yt2009 selected format URL invalid: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Try the responding yt2009 instance first, then other healthy community instances. */
+    private HttpURLConnection openInstanceFormatWithFailover(
+            String pathAndQuery, String preferredInstance, NanoHTTPD.IHTTPSession session) {
+        List<String> candidates = getVideoInstanceCandidates(preferredInstance);
+        for (String base : candidates) {
+            HttpURLConnection connection = null;
+            URL current = null;
+            try {
+                current = new URL(trimSlash(base) + pathAndQuery);
+                for (int redirects = 0; redirects <= 5; redirects++) {
+                    if (!isGoogleVideoUrl(current) && !isKnownInstanceUrl(current, preferredInstance)) {
+                        Log.w(TAG, "Rejected yt2009 instance redirect: " + current);
+                        break;
+                    }
+
+                    connection = openVideoConnection(current, session);
+                    int code = connection.getResponseCode();
+                    if (isRedirect(code)) {
+                        String location = connection.getHeaderField("Location");
+                        if (location == null || location.trim().length() == 0 || redirects == 5) break;
+                        URL next = new URL(current, location);
+                        connection.disconnect();
+                        connection = null;
+                        current = next;
+                        continue;
+                    }
+
+                    String contentType = connection.getContentType();
+                    if (StreamHttpSupport.isRangeNotSatisfiable(code)
+                            || (StreamHttpSupport.isSuccessfulStreamStatus(code)
+                                && StreamHttpSupport.isPlayableContentType(contentType))) {
+                        HttpURLConnection ready = connection;
+                        connection = null;
+                        synchronized (this) { deadInstances.remove(base); }
+                        return ready;
+                    }
+
+                    if (code == 429 || code >= 500) {
+                        synchronized (this) { deadInstances.put(base, System.currentTimeMillis()); }
+                    }
+                    Log.w(TAG, "yt2009 instance stream " + base + " -> HTTP " + code);
+                    break;
+                }
+            } catch (Exception e) {
+                synchronized (this) { deadInstances.put(base, System.currentTimeMillis()); }
+                Log.w(TAG, "yt2009 instance stream failed " + base + ": " + e.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }
+        return null;
+    }
+
+    private HttpURLConnection openSelectedDirect(
+            URL initialUrl, NanoHTTPD.IHTTPSession session, String sourceInstance) {
+        HttpURLConnection connection = null;
+        URL current = initialUrl;
+        try {
+            for (int redirects = 0; redirects <= 5; redirects++) {
+                if (!isGoogleVideoUrl(current)
+                        && !isKnownInstanceUrl(current, sourceInstance)) break;
+                connection = openVideoConnection(current, session);
+                int code = connection.getResponseCode();
+                if (isRedirect(code)) {
+                    String location = connection.getHeaderField("Location");
+                    if (location == null || location.trim().length() == 0 || redirects == 5) break;
+                    URL next = new URL(current, location);
+                    connection.disconnect();
+                    connection = null;
+                    current = next;
+                    continue;
+                }
+                String contentType = connection.getContentType();
+                if (StreamHttpSupport.isRangeNotSatisfiable(code)
+                        || (StreamHttpSupport.isSuccessfulStreamStatus(code)
+                            && StreamHttpSupport.isPlayableContentType(contentType))) {
+                    HttpURLConnection ready = connection;
+                    connection = null;
+                    return ready;
+                }
+                break;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "yt2009 direct stream failed: " + e.getMessage());
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+        return null;
+    }
+
+    private HttpURLConnection openVideoConnection(URL url, NanoHTTPD.IHTTPSession session)
+            throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(120000);
+        connection.setInstanceFollowRedirects(false);
+        connection.setUseCaches(false);
+        connection.setRequestProperty("User-Agent", BROWSER_UA);
+        connection.setRequestProperty("Referer", originOf(url) + "/");
+        String range = null;
+        if (session != null && session.getHeaders() != null)
+            range = session.getHeaders().get("range");
+        StreamHttpSupport.applyRangeHeader(connection, range);
+        return connection;
+    }
+
+    private synchronized List<String> getVideoInstanceCandidates(String preferredInstance) {
+        java.util.LinkedHashSet<String> ordered = new java.util.LinkedHashSet<String>();
+        if (preferredInstance != null && isKnownInstanceBase(preferredInstance))
+            ordered.add(trimSlash(preferredInstance));
+
+        long now = System.currentTimeMillis();
+        if (availableInstances != null && !availableInstances.isEmpty()) {
+            int size = availableInstances.size();
+            for (int offset = 0; offset < size && ordered.size() < MAX_STREAM_INSTANCE_ATTEMPTS - 1; offset++) {
+                int index = (currentInstanceIndex + offset) % size;
+                String base = availableInstances.get(index);
+                Long deadAt = deadInstances.get(base);
+                if (deadAt == null || now - deadAt.longValue() >= DEAD_TTL)
+                    ordered.add(trimSlash(base));
+            }
+        }
+
+        // The pinned historical host is only the final compatibility fallback,
+        // never the only or preferred source when community instances exist.
+        if (ordered.size() < MAX_STREAM_INSTANCE_ATTEMPTS)
+            ordered.add(FALLBACK_INSTANCE);
+        return new ArrayList<String>(ordered);
+    }
+
+    private synchronized boolean isKnownInstanceBase(String base) {
+        if (base == null) return false;
+        try {
+            URL candidate = new URL(base);
+            if (sameOrigin(candidate, FALLBACK_INSTANCE)) return true;
+            if (availableInstances != null) {
+                for (String configured : availableInstances) {
+                    if (sameOrigin(candidate, configured)) return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private synchronized boolean isKnownInstanceUrl(URL target, String preferredInstance) {
+        if (target == null || target.getUserInfo() != null || target.getHost() == null) return false;
+        String protocol = target.getProtocol();
+        if (!"https".equalsIgnoreCase(protocol)
+                && !("http".equalsIgnoreCase(protocol)
+                    && "femboy.email".equalsIgnoreCase(target.getHost())
+                    && target.getPort() == 730)) return false;
+
+        if (sameOrigin(target, FALLBACK_INSTANCE)) return true;
+        if (availableInstances != null) {
+            for (String base : availableInstances) {
+                if (sameOrigin(target, base)) return true;
+            }
+        }
+        return isKnownInstanceBase(preferredInstance)
+            && sameOrigin(target, preferredInstance);
+    }
+
+    private static boolean isGoogleVideoUrl(URL url) {
+        if (url == null || !"https".equalsIgnoreCase(url.getProtocol())
+                || url.getUserInfo() != null) return false;
+        int port = url.getPort() < 0 ? url.getDefaultPort() : url.getPort();
+        if (port != 443) return false;
+        String host = url.getHost() == null ? "" : url.getHost().toLowerCase(Locale.US);
+        return host.equals("googlevideo.com") || host.endsWith(".googlevideo.com");
+    }
+
+    private static boolean sameOrigin(URL target, String base) {
+        if (target == null || base == null) return false;
+        try {
+            URL other = new URL(base);
+            int aPort = target.getPort() < 0 ? target.getDefaultPort() : target.getPort();
+            int bPort = other.getPort() < 0 ? other.getDefaultPort() : other.getPort();
+            return target.getProtocol().equalsIgnoreCase(other.getProtocol())
+                && target.getHost().equalsIgnoreCase(other.getHost()) && aPort == bPort;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isRedirect(int code) {
+        return code == 301 || code == 302 || code == 303 || code == 307 || code == 308;
+    }
+
+    private static String originOf(URL url) {
+        if (url == null) return "";
+        int port = url.getPort();
+        int defaultPort = url.getDefaultPort();
+        return url.getProtocol() + "://" + url.getHost()
+            + (port >= 0 && port != defaultPort ? ":" + port : "");
+    }
+
+    private static String trimSlash(String value) {
+        if (value == null) return "";
+        String result = value;
+        while (result.endsWith("/")) result = result.substring(0, result.length() - 1);
+        return result;
+    }
+
+    private HttpURLConnection tryStreamEndpointFallback(String videoId, NanoHTTPD.IHTTPSession session) {
         // Prefer progressive MP4; the old client cannot reliably play FLV.
         String[] paths = {
             "/exp_hd?video_id=" + videoId,
@@ -360,7 +615,7 @@ public class Yt2009Client {
                     connection.setRequestProperty("User-Agent", BROWSER_UA);
                     if (session != null && session.getHeaders() != null) {
                         String range = session.getHeaders().get("range");
-                        if (range != null) connection.setRequestProperty("Range", range);
+                        StreamHttpSupport.applyRangeHeader(connection, range);
                     }
                     code = connection.getResponseCode();
                     redirects++;
@@ -369,10 +624,9 @@ public class Yt2009Client {
 
                 String contentType = connection.getContentType();
                 Log.i(TAG, "  final HTTP " + code + " ct=" + contentType);
-                if ((code == HttpURLConnection.HTTP_OK || code == HttpURLConnection.HTTP_PARTIAL)
-                        && contentType != null
-                        && (contentType.startsWith("video/")
-                            || contentType.startsWith("application/octet-stream"))) {
+                if (StreamHttpSupport.isRangeNotSatisfiable(code)
+                        || (StreamHttpSupport.isSuccessfulStreamStatus(code)
+                            && StreamHttpSupport.isPlayableContentType(contentType))) {
                     HttpURLConnection ready = connection;
                     connection = null; // Ownership transfers to ProxyServer.
                     failedVideos.remove(videoId);
@@ -552,7 +806,8 @@ public class Yt2009Client {
                 }
 
                 int responseCode = connection.getResponseCode();
-                if (responseCode == 200 || responseCode == 206) return connection;
+                if (StreamHttpSupport.isRangeNotSatisfiable(responseCode)
+                        || StreamHttpSupport.isSuccessfulStreamStatus(responseCode)) return connection;
 
                 if (responseCode == 429 || responseCode >= 500) {
                     synchronized (this) {

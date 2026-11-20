@@ -47,46 +47,56 @@ public class ProxyService extends Service {
         }
     }
 
-    @SuppressWarnings("deprecation")
     private Notification buildNotification() {
         Intent intent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, 0);
 
         if (Build.VERSION.SDK_INT >= 11) {
-            // Notification.Builder.build() exists from API 16; API 11-15 use getNotification().
-            Notification.Builder builder = new Notification.Builder(this)
-                .setContentTitle("ytlegacy-proxy 1.14")
-                .setContentText("Server running on 127.0.0.1:8080")
-                .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true);
-            if (Build.VERSION.SDK_INT >= 16) return builder.build();
-            return builder.getNotification();
-        } else {
-            // API 8-10 (Froyo/Gingerbread): raw Notification + setLatestEventInfo
-            Notification n = new Notification(
-                android.R.drawable.stat_sys_download,
-                "ytlegacy-proxy",
-                System.currentTimeMillis()
-            );
-            n.flags |= Notification.FLAG_ONGOING_EVENT;
-            n.flags |= Notification.FLAG_NO_CLEAR;
-
+            // Reflection avoids hard references to Notification.Builder on API 8-10.
             try {
-                // setLatestEventInfo удалён в API 23, зовём через reflection
-                java.lang.reflect.Method m = Notification.class.getMethod(
-                    "setLatestEventInfo",
-                    android.content.Context.class,
-                    CharSequence.class,
-                    CharSequence.class,
-                    PendingIntent.class
-                );
-                m.invoke(n, this, "ytlegacy-proxy", "Server running", pendingIntent);
+                Class<?> builderClass = Class.forName("android.app.Notification$Builder");
+                Object builder = builderClass.getConstructor(android.content.Context.class).newInstance(this);
+                builderClass.getMethod("setContentTitle", CharSequence.class)
+                    .invoke(builder, "ytlegacy");
+                builderClass.getMethod("setContentText", CharSequence.class)
+                    .invoke(builder, "Local proxy running on 127.0.0.1:8080");
+                builderClass.getMethod("setSmallIcon", int.class)
+                    .invoke(builder, android.R.drawable.stat_sys_download);
+                builderClass.getMethod("setContentIntent", PendingIntent.class)
+                    .invoke(builder, pendingIntent);
+                builderClass.getMethod("setOngoing", boolean.class)
+                    .invoke(builder, true);
+
+                String finishMethod = Build.VERSION.SDK_INT >= 16 ? "build" : "getNotification";
+                return (Notification) builderClass.getMethod(finishMethod).invoke(builder);
             } catch (Throwable t) {
-                Log.w(TAG, "setLatestEventInfo failed: " + t.getMessage());
+                Log.w(TAG, "Notification.Builder unavailable: " + t.getMessage());
             }
-            return n;
         }
+
+        // API 8-10 path; the same reflection path is a fallback on newer systems.
+        Notification notification = new Notification(
+            android.R.drawable.stat_sys_download,
+            "ytlegacy",
+            System.currentTimeMillis()
+        );
+        notification.flags |= Notification.FLAG_ONGOING_EVENT;
+        notification.flags |= Notification.FLAG_NO_CLEAR;
+
+        try {
+            java.lang.reflect.Method method = Notification.class.getMethod(
+                "setLatestEventInfo",
+                android.content.Context.class,
+                CharSequence.class,
+                CharSequence.class,
+                PendingIntent.class
+            );
+            method.invoke(notification, this, "ytlegacy",
+                "Local proxy running on 127.0.0.1:8080", pendingIntent);
+        } catch (Throwable t) {
+            Log.w(TAG, "setLatestEventInfo unavailable: " + t.getMessage());
+        }
+        return notification;
     }
 
     @Override

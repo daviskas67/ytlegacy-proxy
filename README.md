@@ -11,10 +11,58 @@
 
 ## Русский
 
-> 🎉 **ytlegacy-proxy v1.13 уже вышел!**  
-> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13). В этом выпуске мастер входа умеет делиться инструкцией и кодом устройства одной кнопкой, а статус выбранного канала обновляется автоматически.
+> **ytlegacy-proxy v1.14 уже вышел.**  
+> Свежий APK доступен в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.14). Вход через yt2009 необязателен; публичные функции работают без авторизации.
 
 
+### Следующая версия — в разработке
+
+- Выбор публичных источников для поиска, трендов и рекомендаций проходит через отдельный `SourceManager` с фиксированным порядком fallback.
+- Пустой ответ API отделён от ошибки сети/сервера. Например, отказ всех Piped-инстансов больше не маскируется под пустую выдачу.
+- Добавлена диагностика `GET /api/sources`: число попыток, успешных/пустых ответов и ошибок, последняя операция и задержка по каждому провайдеру.
+- GitHub Actions запускает JVM unit-тесты перед сборкой APK.
+- Плеер выбирает цельный progressive MP4 с H.264 + AAC; отдельный video-only adaptive-поток больше не выдаётся как готовое видео.
+- В приложении появилась настройка качества: 360p (по умолчанию), 480p, 720p или Auto (лучшее до 720p). Настройка сохраняется локально; параметр `?quality=...` в запросе имеет приоритет.
+- Старый GData XML теперь объявляет фактические `itag`, ширину и высоту выбранного потока вместо жёстко заданного itag 18.
+- Диагностика `/api/video/{id}` показывает `itag`, разрешение и наличие пригодного потока.
+- Плеер использует общий порядок Invidious → Piped → yt2009 instance pool → InnerTube; результат выбранного провайдера отображается в `/api/sources`.
+- yt2009 `fmt_stream_map` больше не переписывает внутренний адрес на фиксированный `femboy.email`: он привязывается к instance, который вернул метаданные, затем пробует остальные configured HTTPS instances.
+- Piped `/streams/{id}` добавлен в playback; принимаются только цельные H.264 MP4 с `videoOnly=false` и media URL на origin из `proxyUrl`.
+- Проверки `Range`, `206 Partial Content` и `416 Range Not Satisfiable` сохранены для всех playback-провайдеров.
+
+### Единый APK YouTube 5.0.21 + ytlegacy-proxy (v1.16)
+
+- Патченный YouTube 5.0.21 и локальный сервер объединяются в один APK с исходным package `org.ytlegacy.daviskas`; отдельное приложение-прокси не требуется.
+- Прокси запускается автоматически при старте `Application`, до сетевых запросов клиента; сервер слушает только `127.0.0.1:8080`.
+- В штатном экране Settings добавлена отдельная категория **ytlegacy** → **ytlegacy settings**. Системные настройки YouTube остаются на месте.
+- Сборка сливает классы прокси и исходного клиента в один `classes.dex`, чтобы сохранить совместимость с Android API 8.
+- CI повторно декодирует итоговый APK и проверяет package, исходный launcher, прокси-службу, пункт настроек и ранний запуск сервера.
+
+**Установка тестовой сборки:** из-за отсутствия закрытого ключа подписи исходного APK объединённая сборка подписана отдельным debug-ключом. Android не установит её поверх уже установленного APK с другой подписью — старую копию потребуется удалить перед установкой. Удаление приложения может удалить и его локальные данные.
+### Next version — in development
+
+- Public search, trending, and recommendations use a dedicated `SourceManager` with an explicit fallback order.
+- A valid empty API response is tracked separately from a network/server failure. A Piped outage is no longer silently converted into an empty result list.
+- Added `GET /api/sources` diagnostics for provider attempts, successful/empty responses, failures, last operation, and latency.
+- GitHub Actions runs JVM unit tests before assembling the APK.
+- The player selects a single progressive MP4 containing H.264 video and AAC audio; a video-only adaptive stream is never passed off as a complete video.
+- Added an in-app quality setting: 360p (default), 480p, 720p, or Auto (best up to 720p). The choice is stored locally; an explicit `?quality=...` request parameter overrides it.
+- Legacy GData XML now advertises the selected stream's actual `itag`, width, and height instead of hardcoding itag 18.
+- `/api/video/{id}` diagnostics now include `itag`, resolution, and whether a playable stream is available.
+- The player uses a shared Invidious → Piped → yt2009 instance pool → InnerTube fallback chain; the selected provider is recorded in `/api/sources`.
+- yt2009 `fmt_stream_map` URLs are no longer rewritten to a fixed `femboy.email` host. Internal links resolve to the instance that returned the metadata first, then fall back across the configured HTTPS instance pool.
+- Piped `/streams/{id}` is now a playback source; only complete H.264 MP4 entries with `videoOnly=false` and media URLs on the response's advertised `proxyUrl` origin are accepted.
+- `Range`, `206 Partial Content`, and `416 Range Not Satisfiable` are preserved across playback providers.
+
+### Unified YouTube 5.0.21 + ytlegacy-proxy APK (v1.16)
+
+- The patched YouTube 5.0.21 client and local proxy are packaged as one APK under the original package ID, `org.ytlegacy.daviskas`; no separate proxy app is needed.
+- The local server starts automatically from the application's early startup hook, before the YouTube client initializes its network clients. It listens only on `127.0.0.1:8080`.
+- The existing YouTube Settings screen gains its own **ytlegacy** → **ytlegacy settings** entry. The original YouTube settings remain intact.
+- Proxy classes and dependencies are merged into the client's single `classes.dex` to preserve Android API 8 compatibility.
+- CI decodes the rebuilt APK again and checks its package, original launcher, proxy service, dedicated settings entry, and service autostart.
+
+**Test-build installation:** the original APK's private signing key is not available, so the unified test build uses a separate debug key. Android will reject an update over an APK signed with a different key; uninstall the old copy before installing this one. Uninstalling can remove its local data.
 ### v1.13
 
 - В окне входа добавлена кнопка **Share setup instructions**: она отправляет на компьютер URL yt2009, device code и короткую последовательность действий одним сообщением.
@@ -75,8 +123,8 @@
 - **Invidious — основной источник данных.** При запуске прокси параллельно проверяет настроенные экземпляры и измеряет задержку непосредственно с устройства.
 - **Динамический выбор сервера.** Запросы сначала отправляются на самый быстрый доступный экземпляр. Медленные, недоступные, ограничивающие запросы или возвращающие серверные ошибки экземпляры временно пропускаются. Проверка серверов повторяется периодически.
 - **Поддержка основных разделов YouTube.** Поиск, информация о видео, похожие ролики, плейлисты, популярные видео, каналы, загрузки и комментарии используют Invidious в первую очередь.
-- **Воспроизведение видео.** Прокси обрабатывает progressive MP4-потоки и передаёт byte-range запросы, необходимые для перемотки.
-- **Резервные источники.** Piped используется для публичного поиска и трендов, когда Invidious не вернул данные. yt2009 и InnerTube остаются последующими резервами для существующих legacy-маршрутов и потоков.
+- **Воспроизведение видео.** Настраиваемое качество 360p–720p; единый fallback: Invidious-пул → Piped-пул → пул yt2009 community-инстансов → InnerTube. Выбираются только цельные progressive MP4 с H.264 + AAC; byte-range перемотка поддерживается.
+- **Резервные источники.** Piped используется для публичного поиска, трендов и воспроизведения. yt2009 работает через пул community-инстансов: сначала проверяется сервер, вернувший `get_video_info`, затем остальные доступные экземпляры. InnerTube остаётся последним публичным резервом.
 - **Диагностика.** Локальные API показывают состояние сервера, выбранные экземпляры Invidious/Piped, задержки и статистику кэша.
 
 ### Пулы Invidious и Piped
@@ -87,7 +135,7 @@
 
 Дополнительные пользовательские инстансы не являются рекомендацией или проверкой их безопасности. В официальной документации Invidious отдельно предупреждают, что публичные инстансы вне её списка следует считать недоверенными. Не используй случайные публичные инстансы для передачи личных данных или авторизационных токенов.
 
-Piped сейчас служит только резервом для публичного поиска и трендовых лент. Его proxy-адреса не используются для авторизации или воспроизведения видео в этой версии.
+Piped используется для публичного поиска, трендов и воспроизведения. Для плеера вызывается `/streams/{id}` через здоровые API-инстансы; выбирается только `MPEG_4` с H.264 и `videoOnly=false`. URL потока разрешается только на HTTPS-origin, указанном самим ответом в `proxyUrl`. Входные данные и авторизационные заголовки в Piped не отправляются.
 
 ### Авторизация аккаунта
 
@@ -112,9 +160,10 @@ Piped сейчас служит только резервом для публи�
 | `/api/status` | Состояние сервиса |
 | `/api/invidious` | Состояние каждого Invidious-экземпляра, задержка, ошибки и выбранный сервер |
 | `/api/piped` | Состояние каждого Piped API-инстанса и задержки |
+| `/api/sources` | Статистика источников поиска, трендов и playback: успехи, пустые ответы, ошибки и задержки |
 | `/api/yt2009/login/status` | Состояние привязки yt2009 и список каналов |
 | `/api/cache` | Статистика локального кэша |
-| `/api/video/{id}` | Диагностика метаданных конкретного видео |
+| `/api/video/{id}` | Метаданные, выбранный itag/разрешение и наличие совместимого потока |
 
 Полные адреса:
 
@@ -140,7 +189,7 @@ Android-проект находится в каталоге `ytlegacy-android/`.
 
 - JDK 17
 - Android SDK Platform 30
-- Android Build Tools 29.0.3
+- Android Build Tools 30.0.3
 - Android Gradle Plugin 7.4.2
 - Gradle 7.5.1
 
@@ -157,9 +206,9 @@ gradle --no-daemon :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.13-debug` (доступен 14 дней) и публикует v1.13 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
+GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.15-debug` (доступен 14 дней) и публикует v1.15 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.15) после merge-коммита `release v1.15`.
 
-Сборка v1.13 прошла успешно: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
+Сборка v1.14 прошла успешно: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
 
 Дополнительный скрипт `build-manual.sh` рассчитан на окружения, где уже доступны Android SDK tools, D8, Gson 2.2.4 и NanoHTTPD 2.3.1 JAR-файлы.
 
@@ -212,8 +261,8 @@ Invidious — неофициальный API совместимости. Пуб�
 
 ## English
 
-> 🎉 **ytlegacy-proxy v1.13 is here!**  
-> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13). This release adds one-tap sharing for sign-in instructions and improves selected-channel status handling.
+> **ytlegacy-proxy v1.14 is available.**  
+> Get the latest APK from [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.14). yt2009 account linking is optional; public features work without signing in.
 
 
 ### v1.13
@@ -276,8 +325,8 @@ The proxy starts a local HTTP server at `127.0.0.1:8080`. The client communicate
 - **Invidious as the primary provider.** At startup, the proxy probes the configured instances in parallel and measures latency directly from the Android device.
 - **Dynamic server selection.** Requests are routed to the fastest healthy instance. Slow, unavailable, rate-limited, or server-error instances are temporarily skipped; health checks run periodically.
 - **Legacy YouTube features.** Search, video metadata, related videos, playlists, trending feeds, channel pages, uploads, and comments use Invidious first.
-- **Video playback.** Progressive MP4 streams are supported, including byte-range forwarding for seeking.
-- **Fallback providers.** Piped supplies public search and trending data when Invidious cannot. yt2009 and InnerTube remain later fallbacks for existing legacy routes and streams.
+- **Video playback.** Selectable 360p–720p quality and a shared fallback chain: Invidious pool → Piped pool → yt2009 community-instance pool → InnerTube. Only complete progressive H.264 + AAC MP4 streams are selected; byte-range seeking is supported.
+- **Fallback providers.** Piped supplies public search, trending, and playback when Invidious cannot provide a stream. yt2009 uses its community-instance pool: the instance that returned `get_video_info` is tried first, followed by other available instances. InnerTube remains the final public fallback.
 - **Diagnostics.** Local endpoints expose proxy status, Invidious/Piped instance health, selected servers, latency, and cache statistics.
 
 ### Invidious and Piped pools
@@ -288,7 +337,7 @@ All health checks run directly from the device. Invidious is validated through `
 
 The additional community hosts are candidates, not endorsements or security reviews. Invidious documentation explicitly warns that public instances outside its list should be considered untrusted. Do not send personal data or account authorization tokens to random public instances.
 
-Piped is currently used only as a fallback for public search and trending feeds. Its proxy URLs are not used for account authorization or video playback in this version.
+Piped is used for public search, trending, and video playback. The player calls `/streams/{id}` through the healthy API-instance pool and selects only `MPEG_4` H.264 streams with `videoOnly=false`. A media URL is accepted only when it matches the HTTPS origin advertised by the response's `proxyUrl`. No account credentials or authorization headers are sent to Piped.
 
 ### Account authorization
 
@@ -313,9 +362,10 @@ After the service starts, open the relevant endpoint on the device:
 | `/api/status` | Service status |
 | `/api/invidious` | Per-instance health, latency, failures, and selected server |
 | `/api/piped` | Per-instance Piped API health and latency |
+| `/api/sources` | Search, trending, and playback source statistics: successes, empty responses, failures, and latency |
 | `/api/yt2009/login/status` | yt2009 account-link status and available channels |
 | `/api/cache` | Local cache statistics |
-| `/api/video/{id}` | Metadata diagnostics for a video |
+| `/api/video/{id}` | Video metadata, selected itag/resolution, and playable-stream availability |
 
 Full local URLs:
 
@@ -339,7 +389,7 @@ The Android project is located in `ytlegacy-android/`.
 
 - JDK 17
 - Android SDK Platform 30
-- Android Build Tools 29.0.3
+- Android Build Tools 30.0.3
 - Android Gradle Plugin 7.4.2
 - Gradle 7.5.1
 
@@ -356,9 +406,9 @@ The APK is generated at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.11-debug` artifact (available for 14 days) and publishes the v1.13 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.13).
+GitHub Actions uploads the APK as the `ytlegacy-proxy-v1.14-debug` artifact (available for 14 days) and publishes the v1.14 build to [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.14).
 
-The v1.13 build passed: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
+The v1.14 build passed: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
 
 The optional `build-manual.sh` script is intended for environments that already provide Android SDK tools, D8, Gson 2.2.4, and NanoHTTPD 2.3.1 JARs.
 

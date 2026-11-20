@@ -29,6 +29,10 @@ public class VideoData {
 
     /** Converts a public Invidious API video object into the legacy feed/player model. */
     public static VideoData fromInvidious(JsonObject data) {
+        return fromInvidious(data, null);
+    }
+
+    public static VideoData fromInvidious(JsonObject data, String quality) {
         if (data == null) return null;
         VideoData v = new VideoData();
         v.id = getStr(data, "videoId", "");
@@ -65,37 +69,101 @@ public class VideoData {
             }
         } catch (Exception ignored) {}
 
-        // Prefer a progressive MP4 format compatible with the 2013 client.
-        JsonObject selected = null;
+        // Only use single-file MP4 streams containing both H.264 video and AAC audio.
         JsonArray formats = data.has("formatStreams") && data.get("formatStreams").isJsonArray()
             ? data.getAsJsonArray("formatStreams") : null;
-        if (formats != null) {
-            JsonObject firstMp4 = null;
-            for (int i = 0; i < formats.size(); i++) {
-                try {
-                    JsonObject f = formats.get(i).getAsJsonObject();
-                    String url = getStr(f, "url", "");
-                    String type = getStr(f, "type", "");
-                    int itag = getInt(f, "itag", -1);
-                    if (url.length() == 0 || !type.toLowerCase(java.util.Locale.US).startsWith("video/mp4")) continue;
-                    if (itag == 18) { selected = f; break; }
-                    if (firstMp4 == null) firstMp4 = f;
-                } catch (Exception ignored) {}
-            }
-            if (selected == null) selected = firstMp4;
+        JsonObject selected = StreamFormatSelector.selectProgressiveMp4(formats, quality);
+        if (selected == null && data.has("adaptiveFormats")
+                && data.get("adaptiveFormats").isJsonArray()) {
+            // Defensive support for a genuinely muxed adaptive entry. Separate
+            // video-only/audio-only tracks are never accepted or stitched.
+            selected = StreamFormatSelector.selectMuxedAdaptiveMp4(
+                data.getAsJsonArray("adaptiveFormats"), quality);
         }
+        applySelectedStream(v, selected);
+        return v;
+    }
+
+    /** Converts the public Piped /streams response into the shared video model. */
+    public static VideoData fromPiped(JsonObject data, String videoId, String quality) {
+        if (data == null) return null;
+
+        String title = getStr(data, "title", "");
+        String uploader = getStr(data, "uploader", "");
+        if (title.trim().isEmpty() && uploader.trim().isEmpty()
+                && !data.has("videoStreams") && !data.has("duration")) return null;
+
+        VideoData v = new VideoData();
+        v.id = videoId == null ? "" : videoId;
+        if (!v.id.matches("[A-Za-z0-9_-]{11}")) return null;
+
+        v.title = title.trim().isEmpty() ? v.id : title;
+        v.author = uploader.trim().isEmpty() ? "YouTube" : uploader;
+        v.description = getStr(data, "description", "");
+        v.lengthSeconds = Math.max(0, getInt(data, "duration", 0));
+        v.isLive = getBool(data, "livestream") || getInt(data, "duration", 0) == -1;
+
+        String uploaderUrl = getStr(data, "uploaderUrl", "");
+        int channelMarker = uploaderUrl.indexOf("/channel/");
+        if (channelMarker >= 0) {
+            String candidate = uploaderUrl.substring(channelMarker + 9);
+            int end = candidate.indexOf('/');
+            if (end >= 0) candidate = candidate.substring(0, end);
+            if (candidate.matches("UC[A-Za-z0-9_-]{22}")) v.channelId = candidate;
+        }
+
+        long views = getLong(data, "views", 0L);
+        long likes = getLong(data, "likes", 0L);
+        v.viewCount = Math.max(0L, views);
+        v.likeCount = Math.max(0L, likes);
+
+        // Piped's "uploaded" value is Unix epoch milliseconds.
+        long uploaded = getLong(data, "uploaded", 0L);
+        if (uploaded > 0L) {
+            java.text.SimpleDateFormat iso = new java.text.SimpleDateFormat(
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+            iso.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            v.published = iso.format(new java.util.Date(uploaded));
+            java.text.SimpleDateFormat day = new java.text.SimpleDateFormat(
+                "yyyyMMdd", java.util.Locale.US);
+            day.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            v.uploadDate = day.format(new java.util.Date(uploaded));
+        } else {
+            String uploadDate = getStr(data, "uploadDate", "");
+            if (uploadDate.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                v.published = uploadDate + "T00:00:00.000Z";
+                v.uploadDate = uploadDate.replace("-", "");
+            }
+        }
+
+        // Only select a progressive muxed H.264 MP4; the legacy player cannot
+        // combine separate DASH audio/video tracks.
+        PipedStreamSelector.Selection selected = PipedStreamSelector.select(data, quality);
         if (selected != null) {
-            v.streamUrl = getStr(selected, "url", "");
-            v.itag = getInt(selected, "itag", 18);
-            v.mimeType = getStr(selected, "type", "video/mp4");
-            String resolution = getStr(selected, "resolution", "");
-            String quality = getStr(selected, "qualityLabel", "");
-            int height = parseResolutionHeight(resolution);
-            if (height <= 0) height = parseResolutionHeight(quality);
-            if (height > 0) v.height = height;
-            if (v.height >= 720) v.isHd = true;
+            v.streamUrl = selected.url;
+            v.mimeType = selected.mimeType;
+            v.height = selected.height;
+            v.width = selected.width > 0 ? selected.width : (selected.height * 16) / 9;
+            v.isHd = v.height >= 720;
+            v.itag = 18;
         }
         return v;
+    }
+
+    /** Converts this model to the subset of a YouTube Data API v3 video used by the legacy client. */
+    public JsonObject toYouTubeV3Json() {
+        JsonObject result = new JsonObject();
+        result.addProperty("videoId", id);
+        result.addProperty("title", title);
+        result.addProperty("description", description);
+        result.addProperty("author", author);
+        String validChannelId = channelId != null && channelId.matches("UC[A-Za-z0-9_-]{22}")
+            ? channelId : "";
+        result.addProperty("authorId", validChannelId);
+        result.addProperty("lengthSeconds", lengthSeconds);
+        result.addProperty("viewCount", viewCount);
+        result.addProperty("likeCount", likeCount);
+        return result;
     }
 
     private static int parseResolutionHeight(String value) {
@@ -109,6 +177,10 @@ public class VideoData {
     }
 
     public static VideoData fromInnerTube(JsonObject resp) {
+        return fromInnerTube(resp, null);
+    }
+
+    public static VideoData fromInnerTube(JsonObject resp, String quality) {
         VideoData v = new VideoData();
         if (resp == null) return v;
 
@@ -166,68 +238,49 @@ public class VideoData {
         }
 
         if (resp.has("streamingData") && resp.get("streamingData").isJsonObject()) {
-            JsonObject sd = resp.getAsJsonObject("streamingData");
-            if (sd.has("formats") && sd.get("formats").isJsonArray()) {
-                JsonArray formats = sd.getAsJsonArray("formats");
-                for (int i = 0; i < formats.size(); i++) {
-                    JsonObject f = formats.get(i).getAsJsonObject();
-                    int itag = getInt(f, "itag", -1);
-                    if (itag == 18) {
-                        v.itag = 18;
-                        v.streamUrl = getStr(f, "url", "");
-                        v.mimeType = getStr(f, "mimeType", "video/mp4");
-                        v.width = getInt(f, "width", 480);
-                        v.height = getInt(f, "height", 360);
-                        break;
-                    }
-                }
-                if (v.streamUrl.isEmpty() && formats.size() > 0) {
-                    JsonObject f = formats.get(0).getAsJsonObject();
-                    v.itag = getInt(f, "itag", 18);
-                    v.streamUrl = getStr(f, "url", "");
-                    v.mimeType = getStr(f, "mimeType", "video/mp4");
-                    v.width = getInt(f, "width", 480);
-                    v.height = getInt(f, "height", 360);
-                }
-            }
-            if (sd.has("adaptiveFormats") && sd.get("adaptiveFormats").isJsonArray()) {
-                JsonArray af = sd.getAsJsonArray("adaptiveFormats");
-                for (int i = 0; i < af.size(); i++) {
-                    JsonObject f = af.get(i).getAsJsonObject();
-                    int h = getInt(f, "height", 0);
-                    if (h > v.height) v.height = h;
-                }
-            }
-        }
+            JsonObject streaming = resp.getAsJsonObject("streamingData");
+            JsonArray progressive = streaming.has("formats") && streaming.get("formats").isJsonArray()
+                ? streaming.getAsJsonArray("formats") : null;
+            JsonObject selected = StreamFormatSelector.selectProgressiveMp4(progressive, quality);
 
-        // adaptive fallback
-        if (v.streamUrl == null || v.streamUrl.isEmpty()) {
-            try {
-                if (resp.has("streamingData") && resp.get("streamingData").isJsonObject()) {
-                    JsonObject sd2 = resp.getAsJsonObject("streamingData");
-                    if (sd2.has("adaptiveFormats") && sd2.get("adaptiveFormats").isJsonArray()) {
-                        JsonArray af2 = sd2.getAsJsonArray("adaptiveFormats");
-                        for (int i = 0; i < af2.size(); i++) {
-                            JsonObject f2 = af2.get(i).getAsJsonObject();
-                            String mt2 = getStr(f2, "mimeType", "");
-                            String us2 = getStr(f2, "url", "");
-                            if (mt2.startsWith("video/mp4") && !us2.isEmpty()) {
-                                v.streamUrl = us2;
-                                v.itag = getInt(f2, "itag", v.itag);
-                                v.mimeType = mt2;
-                                android.util.Log.w("VideoData", "adaptive fallback " + v.id + " itag=" + v.itag);
-                                break;
-                            }
-                        }
-                    }
-                }
-            } catch (Exception ex) {}
+            if (selected == null && streaming.has("adaptiveFormats")
+                    && streaming.get("adaptiveFormats").isJsonArray()) {
+                // YouTube's normal adaptiveFormats are split into independent
+                // audio/video tracks. Accept only an explicitly muxed H.264/AAC
+                // entry; do not hand a silent video-only MP4 to the old player.
+                selected = StreamFormatSelector.selectMuxedAdaptiveMp4(
+                    streaming.getAsJsonArray("adaptiveFormats"), quality);
+            }
+            applySelectedStream(v, selected);
         }
-        android.util.Log.i("VideoData",
-            "PARSED " + v.id + " itag=" + v.itag + " streamUrl_len=" + v.streamUrl.length()
-            + " mime=" + v.mimeType + " w=" + v.width + " h=" + v.height);
+        logParsedStream(v);
         if (v.height >= 720) v.isHd = true;
         return v;
+    }
+
+    private static void logParsedStream(VideoData video) {
+        try {
+            android.util.Log.i("VideoData",
+                "PARSED " + video.id + " itag=" + video.itag
+                + " streamUrl_len=" + video.streamUrl.length()
+                + " mime=" + video.mimeType + " w=" + video.width + " h=" + video.height);
+        } catch (RuntimeException ignored) {
+            // Android's local-JVM stubs throw; stream parsing must stay testable without a device.
+        }
+    }
+
+    private static void applySelectedStream(VideoData video, JsonObject selected) {
+        if (video == null || selected == null) return;
+        String url = getStr(selected, "url", "");
+        if (url.length() == 0) return;
+
+        int height = StreamFormatSelector.getHeight(selected);
+        video.streamUrl = url;
+        video.itag = getInt(selected, "itag", 18);
+        video.mimeType = getStr(selected, "mimeType", getStr(selected, "type", "video/mp4"));
+        video.height = height > 0 ? height : 360;
+        video.width = getInt(selected, "width", (video.height * 16) / 9);
+        video.isHd = video.height >= 720;
     }
 
     public static String getStr(JsonObject o, String k, String d) {

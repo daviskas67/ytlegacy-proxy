@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.16] - Unreleased
+
+### Changed
+- Объединён патченный YouTube 5.0.21 и ytlegacy-proxy в один APK под исходным package `org.ytlegacy.daviskas`; отдельная установка прокси больше не нужна.
+- Локальный `ProxyService` запускается автоматически на старте `Application` и слушает только `127.0.0.1:8080`.
+- В исходном экране настроек YouTube добавлен отдельный пункт **ytlegacy** → **ytlegacy settings**, не заменяющий остальные настройки клиента.
+- Классы прокси и зависимости объединяются с исходным клиентом в единственный `classes.dex` для совместимости с Android API 8.
+- Добавлена повторная проверка итогового APK после декодирования: package, исходный launcher, service, settings preference и автозапуск.
+
+### Fixed
+- Исправлены protobuf field numbers для `contentDetails.upload` и вложенного `upload.videoId`: клиент YouTube 5.0.21 ожидает поле `10101` на обоих уровнях. Прежний ответ оставлял объект Upload пустым и приводил к `NullPointerException` в адаптере ленты.
+- Добавлен regression-тест, который декодирует ответ `activities` и проверяет реальные номера/типы вложенных protobuf-полей.
+
+- Маршрут `/youtube/v3/videos` больше не зависит только от Invidious: при недоступности Invidious используется Piped, затем yt2009 и InnerTube для метаданных.
+- Добавлен разбор метаданных Piped `/streams/{videoId}`, включая автора, описание, длительность, просмотры и лайки; прогрессивный MP4 выбирается только при соблюдении существующих проверок формата.
+- Запросы к Invidious/Piped ограничены двумя живыми инстансами и отдельными короткими таймаутами; помеченные нездоровыми Invidious-инстансы больше не используются после окончания cooldown до успешной проверки.
+- Для `/youtube/v3/videos` используется metadata-only режим без лишних запросов InnerTube за потоком и без сетевого поиска channel ID по отображаемому имени.
+- Добавлены regression-тесты преобразования ответа Piped в модель видео.
+
+### Verification
+- CI: JVM unit tests, сборка прокси, объединение APK, single-DEX/method-reference check, round-trip decode и проверка подписи.
+- Воспроизведение, перемотка, автозапуск на устройстве и открытие пункта настроек требуют финальной проверки на реальном Android.
+- Тестовая сборка подписывается отдельным debug-ключом; для установки поверх оригинального APK потребуется удалить предыдущую копию из-за несовпадения подписей.
+## [1.15] - Unreleased
+
+### Changed
+- Добавлен единый порядок выбора playback-провайдера: Invidious → Piped → yt2009 community-instance pool → InnerTube; статистика доступна в `/api/sources`.
+- Piped `/streams/{id}` добавлен как источник потоков через здоровые API-инстансы. Принимаются только цельные progressive H.264 MP4 (`videoOnly=false`) с HTTPS-origin, совпадающим с `proxyUrl` из ответа.
+- yt2009 `fmt_stream_map` больше не переписывает внутренние ссылки на один фиксированный хост. Используется инстанс, вернувший `get_video_info`, затем ограниченный пул остальных доступных HTTPS-инстансов.
+- Поддержаны Range, 206 и 416 на всех playback-провайдерах; добавлены тесты на перемотку и форматные фильтры.
+- Версия Android package, health endpoint и service notification обновлены до 1.15.
+
+### Verification
+- Unit tests and APK build are being checked by GitHub Actions for this pull request.
+- Actual audio playback, seeking, and quality switching still require testing on a physical legacy Android device.
+
 ## [1.14] - 2026-11-20
 
 ### Changed

@@ -30,6 +30,9 @@ public final class PipedClient {
     private static final String TAG = "Piped";
     private static final int CONNECT_TIMEOUT_MS = 2500;
     private static final int READ_TIMEOUT_MS = 5000;
+    private static final int REQUEST_CONNECT_TIMEOUT_MS = 1200;
+    private static final int REQUEST_READ_TIMEOUT_MS = 2500;
+    private static final int MAX_REQUEST_ATTEMPTS = 2;
     private static final long DOWN_TTL_MS = 60000L;
     private static final long PROBE_INTERVAL_MS = 60000L;
 
@@ -159,13 +162,20 @@ public final class PipedClient {
         return normalizeVideos(result);
     }
 
+    /** Fetches unauthenticated stream metadata through the healthy Piped instance pool. */
+    public JsonObject streams(String videoId) {
+        if (!validVideoId(videoId)) return null;
+        JsonElement result = getJson("/streams/" + encode(videoId));
+        return result != null && result.isJsonObject() ? result.getAsJsonObject() : null;
+    }
+
     public JsonArray search(String query) {
         String q = query == null ? "" : query;
         JsonElement result = getJson("/search?q=" + encode(q) + "&filter=videos");
         return normalizeVideos(result);
     }
 
-    private JsonArray normalizeVideos(JsonElement response) {
+    JsonArray normalizeVideos(JsonElement response) {
         JsonArray source = null;
         if (response != null && response.isJsonArray()) {
             source = response.getAsJsonArray();
@@ -175,8 +185,9 @@ public final class PipedClient {
                 source = object.getAsJsonArray("items");
         }
 
+        if (source == null) return null;
+
         JsonArray normalized = new JsonArray();
-        if (source == null) return normalized;
 
         for (int i = 0; i < source.size() && normalized.size() < 50; i++) {
             try {
@@ -208,18 +219,24 @@ public final class PipedClient {
         return normalized;
     }
 
+
+    // Package-private seam for local unit tests; production callers use search/trending.
     private JsonElement getJson(String path) {
         awaitInitialProbe();
         if (System.currentTimeMillis() - lastProbeAt >= PROBE_INTERVAL_MS)
             refreshInBackground();
 
         List<Server> ordered = getOrderedServers();
+        int attempts = 0;
         for (Server server : ordered) {
             synchronized (lock) {
                 if (!server.probed || !server.alive || server.deadUntil > System.currentTimeMillis()) continue;
             }
+            if (attempts >= MAX_REQUEST_ATTEMPTS) break;
+            attempts++;
             long start = System.nanoTime();
-            JsonElement result = requestRaw(server.base, path, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
+            JsonElement result = requestRaw(server.base, path,
+                REQUEST_CONNECT_TIMEOUT_MS, REQUEST_READ_TIMEOUT_MS);
             long latency = Math.max(1L, (System.nanoTime() - start) / 1000000L);
             int status = lastHttpStatus.get() == null ? 0 : lastHttpStatus.get().intValue();
 
