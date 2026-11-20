@@ -20,7 +20,6 @@ public class GDataXmlBuilder {
         int streamItag = v.itag > 0 ? v.itag : 18;
         int streamHeight = v.height >= 144 ? Math.min(v.height, 720) : 360;
         int streamWidth = v.width > 0 ? v.width : (streamHeight * 16) / 9;
-        String streamQuality = streamHeight + "p";
 
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
             "<entry xmlns=\"http://www.w3.org/2005/Atom\" " +
@@ -55,7 +54,7 @@ public class GDataXmlBuilder {
             "    <media:description type=\"plain\">" + esc(v.description) + "</media:description>\n" +
             "    <media:keywords>" + keywords + "</media:keywords>\n" +
             "    <media:category label=\"" + esc(v.category) + "\" scheme=\"http://gdata.youtube.com/schemas/2007/categories.cat\">" + esc(v.category) + "</media:category>\n" +
-            "    <media:content url=\"" + BASE + "/video/" + v.id + ".mp4?quality=" + streamQuality + "\" type=\"video/mp4\" medium=\"video\" isDefault=\"true\" expression=\"full\" duration=\"" + v.lengthSeconds + "\" yt:format=\"" + streamItag + "\" itag=\"" + streamItag + "\" width=\"" + streamWidth + "\" height=\"" + streamHeight + "\"/>\n" +
+            "    <media:content url=\"" + BASE + "/video/" + v.id + ".mp4\" type=\"video/mp4\" medium=\"video\" isDefault=\"true\" expression=\"full\" duration=\"" + v.lengthSeconds + "\" yt:format=\"" + streamItag + "\" itag=\"" + streamItag + "\" width=\"" + streamWidth + "\" height=\"" + streamHeight + "\"/>\n" +
             "    <media:thumbnail url=\"" + BASE + "/vi/" + v.id + "/3.jpg\" height=\"720\" width=\"1280\" time=\"00:00:00.000\" yt:name=\"maxresdefault\"/>\n" +
             "    <media:thumbnail url=\"" + BASE + "/vi/" + v.id + "/0.jpg\" height=\"360\" width=\"480\" time=\"00:00:00.000\" yt:name=\"hqdefault\"/>\n" +
             "    <media:thumbnail url=\"" + BASE + "/vi/" + v.id + "/2.jpg\" height=\"180\" width=\"320\" time=\"00:00:00.000\" yt:name=\"mqdefault\"/>\n" +
