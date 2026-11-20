@@ -188,7 +188,7 @@ gradle --no-daemon :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.14-debug` (доступен 14 дней) и публикует v1.14 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.14).
+GitHub Actions загружает APK как артефакт `ytlegacy-proxy-v1.15-debug` (доступен 14 дней) и публикует v1.15 в [GitHub Releases](https://github.com/daviskas67/ytlegacy-proxy/releases/tag/v1.15) после merge-коммита `release v1.15`.
 
 Сборка v1.14 прошла успешно: [GitHub Actions run #44711183134](https://github.com/daviskas67/ytlegacy-proxy/actions/runs/44711183134).
 
