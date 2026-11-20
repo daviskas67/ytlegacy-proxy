@@ -84,6 +84,86 @@ public class VideoData {
         return v;
     }
 
+    /** Converts the public Piped /streams response into the shared video model. */
+    public static VideoData fromPiped(JsonObject data, String videoId, String quality) {
+        if (data == null) return null;
+
+        String title = getStr(data, "title", "");
+        String uploader = getStr(data, "uploader", "");
+        if (title.trim().isEmpty() && uploader.trim().isEmpty()
+                && !data.has("videoStreams") && !data.has("duration")) return null;
+
+        VideoData v = new VideoData();
+        v.id = videoId == null ? "" : videoId;
+        if (!v.id.matches("[A-Za-z0-9_-]{11}")) return null;
+
+        v.title = title.trim().isEmpty() ? v.id : title;
+        v.author = uploader.trim().isEmpty() ? "YouTube" : uploader;
+        v.description = getStr(data, "description", "");
+        v.lengthSeconds = Math.max(0, getInt(data, "duration", 0));
+        v.isLive = getBool(data, "livestream") || getInt(data, "duration", 0) == -1;
+
+        String uploaderUrl = getStr(data, "uploaderUrl", "");
+        int channelMarker = uploaderUrl.indexOf("/channel/");
+        if (channelMarker >= 0) {
+            String candidate = uploaderUrl.substring(channelMarker + 9);
+            int end = candidate.indexOf('/');
+            if (end >= 0) candidate = candidate.substring(0, end);
+            if (candidate.matches("UC[A-Za-z0-9_-]{22}")) v.channelId = candidate;
+        }
+
+        long views = getLong(data, "views", 0L);
+        long likes = getLong(data, "likes", 0L);
+        v.viewCount = Math.max(0L, views);
+        v.likeCount = Math.max(0L, likes);
+
+        // Piped's "uploaded" value is Unix epoch milliseconds.
+        long uploaded = getLong(data, "uploaded", 0L);
+        if (uploaded > 0L) {
+            java.text.SimpleDateFormat iso = new java.text.SimpleDateFormat(
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+            iso.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            v.published = iso.format(new java.util.Date(uploaded));
+            java.text.SimpleDateFormat day = new java.text.SimpleDateFormat(
+                "yyyyMMdd", java.util.Locale.US);
+            day.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            v.uploadDate = day.format(new java.util.Date(uploaded));
+        } else {
+            String uploadDate = getStr(data, "uploadDate", "");
+            if (uploadDate.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                v.published = uploadDate + "T00:00:00.000Z";
+                v.uploadDate = uploadDate.replace("-", "");
+            }
+        }
+
+        // Only select a progressive muxed H.264 MP4; the legacy player cannot
+        // combine separate DASH audio/video tracks.
+        PipedStreamSelector.Selection selected = PipedStreamSelector.select(data, quality);
+        if (selected != null) {
+            v.streamUrl = selected.url;
+            v.mimeType = selected.mimeType;
+            v.height = selected.height;
+            v.width = selected.width > 0 ? selected.width : (selected.height * 16) / 9;
+            v.isHd = v.height >= 720;
+            v.itag = 18;
+        }
+        return v;
+    }
+
+    /** Converts this model to the subset of a YouTube Data API v3 video used by the legacy client. */
+    public JsonObject toYouTubeV3Json() {
+        JsonObject result = new JsonObject();
+        result.addProperty("videoId", id);
+        result.addProperty("title", title);
+        result.addProperty("description", description);
+        result.addProperty("author", author);
+        result.addProperty("authorId", channelId);
+        result.addProperty("lengthSeconds", lengthSeconds);
+        result.addProperty("viewCount", viewCount);
+        result.addProperty("likeCount", likeCount);
+        return result;
+    }
+
     private static int parseResolutionHeight(String value) {
         if (value == null) return 0;
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{3,4})p").matcher(value);
